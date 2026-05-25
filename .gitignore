@@ -5,6 +5,7 @@ helix
 data/*.db
 data/*.db-shm
 data/*.db-wal
+sql/seed_real_trades.sql
 
 # Local Coinbase/API debug outputs
 data/*.json
