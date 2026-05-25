@@ -37,14 +37,25 @@ int db_init(void) {
         return 0;
     }
 
+    /*
+     * Schema compatibile con:
+     * - trade simulati Helix
+     * - import storico reale da Excel/Coinbase
+     *
+     * Le colonne extra sono nullable, quindi db_log_trade continua a funzionare.
+     */
     const char *trades_sql =
         "CREATE TABLE IF NOT EXISTS trades ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "type TEXT NOT NULL,"
-        "price REAL NOT NULL,"
+        "price REAL,"
         "eur_amount REAL NOT NULL,"
         "btc_amount REAL NOT NULL,"
-        "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+        "fee_amount REAL DEFAULT 0,"
+        "net_total REAL,"
+        "reference TEXT,"
+        "source TEXT DEFAULT 'HELIX',"
+        "created_at TEXT DEFAULT CURRENT_TIMESTAMP"
         ");";
 
     if (sqlite3_exec(db, trades_sql, NULL, NULL, &err) != SQLITE_OK) {
@@ -150,7 +161,8 @@ int db_load_state(BotState *state) {
         state->last_buy_price = sqlite3_column_double(stmt, 5);
         state->avg_buy_price = sqlite3_column_double(stmt, 6);
 
-        const unsigned char *trade = sqlite3_column_text(stmt, 7);
+        const unsigned char *trade =
+            sqlite3_column_text(stmt, 7);
 
         if (trade) {
             snprintf(
@@ -188,8 +200,8 @@ int db_log_trade(
 
     const char *sql =
         "INSERT INTO trades "
-        "(type, price, eur_amount, btc_amount) "
-        "VALUES (?, ?, ?, ?);";
+        "(type, price, eur_amount, btc_amount, source) "
+        "VALUES (?, ?, ?, ?, 'HELIX');";
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         sqlite3_close(db);
@@ -225,7 +237,7 @@ int db_get_recent_trades(
     }
 
     const char *sql =
-        "SELECT id, type, price, eur_amount, btc_amount, created_at "
+        "SELECT id, type, COALESCE(price, 0), eur_amount, btc_amount, created_at "
         "FROM trades "
         "ORDER BY id DESC "
         "LIMIT ?;";
