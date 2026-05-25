@@ -21,6 +21,8 @@ int db_init(void) {
         "eur_balance REAL NOT NULL,"
         "btc_balance REAL NOT NULL,"
         "current_price REAL NOT NULL,"
+        "last_buy_price REAL NOT NULL,"
+        "avg_buy_price REAL NOT NULL,"
         "used_slots INTEGER NOT NULL,"
         "max_slots INTEGER NOT NULL"
         ");";
@@ -46,14 +48,16 @@ int db_save_state(const BotState *state) {
 
     const char *sql =
         "INSERT INTO bot_state "
-        "(id, running, mode, eur_balance, btc_balance, current_price, used_slots, max_slots) "
-        "VALUES (1, ?, ?, ?, ?, ?, ?, ?) "
+        "(id, running, mode, eur_balance, btc_balance, current_price, last_buy_price, avg_buy_price, used_slots, max_slots) "
+        "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "running=excluded.running,"
         "mode=excluded.mode,"
         "eur_balance=excluded.eur_balance,"
         "btc_balance=excluded.btc_balance,"
         "current_price=excluded.current_price,"
+        "last_buy_price=excluded.last_buy_price,"
+        "avg_buy_price=excluded.avg_buy_price,"
         "used_slots=excluded.used_slots,"
         "max_slots=excluded.max_slots;";
 
@@ -64,8 +68,10 @@ int db_save_state(const BotState *state) {
     sqlite3_bind_double(stmt, 3, state->eur_balance);
     sqlite3_bind_double(stmt, 4, state->btc_balance);
     sqlite3_bind_double(stmt, 5, state->current_price);
-    sqlite3_bind_int(stmt, 6, state->used_slots);
-    sqlite3_bind_int(stmt, 7, state->max_slots);
+    sqlite3_bind_double(stmt, 6, state->last_buy_price);
+    sqlite3_bind_double(stmt, 7, state->avg_buy_price);
+    sqlite3_bind_int(stmt, 8, state->used_slots);
+    sqlite3_bind_int(stmt, 9, state->max_slots);
 
     int ok = sqlite3_step(stmt) == SQLITE_DONE;
 
@@ -84,7 +90,7 @@ int db_load_state(BotState *state) {
     }
 
     const char *sql =
-        "SELECT running, mode, eur_balance, btc_balance, current_price, used_slots, max_slots "
+        "SELECT running, mode, eur_balance, btc_balance, current_price, last_buy_price, avg_buy_price, used_slots, max_slots "
         "FROM bot_state WHERE id = 1;";
 
     sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -97,8 +103,10 @@ int db_load_state(BotState *state) {
         state->eur_balance = sqlite3_column_double(stmt, 2);
         state->btc_balance = sqlite3_column_double(stmt, 3);
         state->current_price = sqlite3_column_double(stmt, 4);
-        state->used_slots = sqlite3_column_int(stmt, 5);
-        state->max_slots = sqlite3_column_int(stmt, 6);
+        state->last_buy_price = sqlite3_column_double(stmt, 5);
+        state->avg_buy_price = sqlite3_column_double(stmt, 6);
+        state->used_slots = sqlite3_column_int(stmt, 7);
+        state->max_slots = sqlite3_column_int(stmt, 8);
         found = 1;
     }
 

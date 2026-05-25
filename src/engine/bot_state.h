@@ -18,6 +18,8 @@ typedef struct {
     double eur_balance;
     double btc_balance;
     double current_price;
+    double last_buy_price;
+    double avg_buy_price;
     int used_slots;
     int max_slots;
 } BotState;

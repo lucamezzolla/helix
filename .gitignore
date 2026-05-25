@@ -1,0 +1,21 @@
+# Binario compilato
+helix
+
+# Database SQLite
+data/*.db
+
+# Build temporanee
+*.o
+*.out
+
+# Archivi
+*.7z
+*.zip
+*.tar.gz
+
+# Editor
+.vscode/
+.idea/
+
+# Sistema
+.DS_Store
