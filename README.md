@@ -28,6 +28,13 @@ Implemented:
   - `SIMULATION`
   - `LIVE_READONLY`
   - `LIVE_TRADING` placeholder, intentionally blocked
+- internal trade preview engine
+- fee-aware BUY/SELL preview calculations
+- estimated profit and break-even calculations
+- Coinbase fills/order reconstruction (read-only)
+- engine audit journal
+- audit throttling and retention cleanup
+- configurable audit retention days
 
 Not implemented yet:
 

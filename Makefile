@@ -6,6 +6,7 @@ SRC=src/main.c \
 	src/ui/window.c \
 	src/engine/bot_state.c \
 	src/engine/engine.c \
+	src/engine/trade_preview.c \
 	src/engine/settings.c \
 	src/engine/wallet.c \
 	src/db/database.c \

@@ -11,8 +11,12 @@ typedef struct {
     double slot_amount_eur;
     double buy_drop_percent;
     double sell_profit_percent;
+    double estimated_fee_percent;
+    double min_profit_eur;
+    double min_profit_percent;
     double min_liquidity_percent;
     int max_slots;
+    int audit_retention_days;
     RuntimeMode runtime_mode;
 } StrategySettings;
 

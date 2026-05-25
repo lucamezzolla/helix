@@ -78,6 +78,27 @@ int db_init(void) {
         return 0;
     }
 
+    const char *audit_sql =
+        "CREATE TABLE IF NOT EXISTS engine_audit ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "event_type TEXT NOT NULL,"
+        "decision TEXT NOT NULL,"
+        "reason TEXT NOT NULL,"
+        "price REAL DEFAULT 0,"
+        "btc_amount REAL DEFAULT 0,"
+        "eur_amount REAL DEFAULT 0,"
+        "estimated_fee REAL DEFAULT 0,"
+        "net_profit REAL DEFAULT 0,"
+        "created_at TEXT DEFAULT CURRENT_TIMESTAMP"
+        ");";
+
+    if (sqlite3_exec(db, audit_sql, NULL, NULL, &err) != SQLITE_OK) {
+        fprintf(stderr, "Errore SQL engine_audit: %s\n", err);
+        sqlite3_free(err);
+        sqlite3_close(db);
+        return 0;
+    }
+
     sqlite3_close(db);
 
     return 1;
@@ -365,4 +386,141 @@ int db_get_setting(
     sqlite3_close(db);
 
     return found;
+}
+
+
+int db_log_engine_audit(
+    const char *event_type,
+    const char *decision,
+    const char *reason,
+    double price,
+    double btc_amount,
+    double eur_amount,
+    double estimated_fee,
+    double net_profit
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "INSERT INTO engine_audit "
+        "(event_type, decision, reason, price, btc_amount, eur_amount, estimated_fee, net_profit) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, event_type ? event_type : "UNKNOWN", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, decision ? decision : "UNKNOWN", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, reason ? reason : "", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(stmt, 4, price);
+    sqlite3_bind_double(stmt, 5, btc_amount);
+    sqlite3_bind_double(stmt, 6, eur_amount);
+    sqlite3_bind_double(stmt, 7, estimated_fee);
+    sqlite3_bind_double(stmt, 8, net_profit);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+int db_get_recent_engine_audits(
+    EngineAuditRecord *records,
+    int max_records
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (records == NULL || max_records <= 0) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT id, event_type, decision, reason, price, btc_amount, eur_amount, "
+        "estimated_fee, net_profit, created_at "
+        "FROM engine_audit "
+        "ORDER BY id DESC "
+        "LIMIT ?;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_int(stmt, 1, max_records);
+
+    int count = 0;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max_records) {
+        const unsigned char *event_type = sqlite3_column_text(stmt, 1);
+        const unsigned char *decision = sqlite3_column_text(stmt, 2);
+        const unsigned char *reason = sqlite3_column_text(stmt, 3);
+        const unsigned char *created_at = sqlite3_column_text(stmt, 9);
+
+        records[count].id = sqlite3_column_int(stmt, 0);
+
+        snprintf(records[count].event_type, sizeof(records[count].event_type), "%s", event_type ? (const char *)event_type : "");
+        snprintf(records[count].decision, sizeof(records[count].decision), "%s", decision ? (const char *)decision : "");
+        snprintf(records[count].reason, sizeof(records[count].reason), "%s", reason ? (const char *)reason : "");
+
+        records[count].price = sqlite3_column_double(stmt, 4);
+        records[count].btc_amount = sqlite3_column_double(stmt, 5);
+        records[count].eur_amount = sqlite3_column_double(stmt, 6);
+        records[count].estimated_fee = sqlite3_column_double(stmt, 7);
+        records[count].net_profit = sqlite3_column_double(stmt, 8);
+
+        snprintf(records[count].created_at, sizeof(records[count].created_at), "%s", created_at ? (const char *)created_at : "");
+
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return count;
+}
+
+
+int db_prune_engine_audits(int retention_days) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (retention_days <= 0) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "DELETE FROM engine_audit "
+        "WHERE created_at < datetime('now', '-' || ? || ' days');";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_int(stmt, 1, retention_days);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
 }

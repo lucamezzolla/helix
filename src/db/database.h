@@ -12,6 +12,19 @@ typedef struct {
     char created_at[32];
 } TradeRecord;
 
+typedef struct {
+    int id;
+    char event_type[32];
+    char decision[32];
+    char reason[256];
+    double price;
+    double btc_amount;
+    double eur_amount;
+    double estimated_fee;
+    double net_profit;
+    char created_at[32];
+} EngineAuditRecord;
+
 int db_init(void);
 
 int db_save_state(const BotState *state);
@@ -28,6 +41,24 @@ int db_get_recent_trades(
     TradeRecord *trades,
     int max_trades
 );
+
+int db_log_engine_audit(
+    const char *event_type,
+    const char *decision,
+    const char *reason,
+    double price,
+    double btc_amount,
+    double eur_amount,
+    double estimated_fee,
+    double net_profit
+);
+
+int db_get_recent_engine_audits(
+    EngineAuditRecord *records,
+    int max_records
+);
+
+int db_prune_engine_audits(int retention_days);
 
 int db_set_setting(
     const char *key,

@@ -12,6 +12,26 @@
 #include <string.h>
 
 #define TRADE_HISTORY_LIMIT 8
+#define ENGINE_AUDIT_LIMIT 8
+
+static double parse_decimal_input(const char *value) {
+    char buffer[64];
+    size_t i;
+
+    if (value == NULL || value[0] == '\0') {
+        return 0.0;
+    }
+
+    snprintf(buffer, sizeof(buffer), "%s", value);
+
+    for (i = 0; buffer[i] != '\0'; i++) {
+        if (buffer[i] == ',') {
+            buffer[i] = '.';
+        }
+    }
+
+    return strtod(buffer, NULL);
+}
 
 typedef struct {
     BotState *state;
@@ -27,12 +47,17 @@ typedef struct {
     GtkWidget *settings_label;
     GtkWidget *status_label;
     GtkWidget *trade_list;
+    GtkWidget *audit_list;
 
     GtkWidget *slot_amount_entry;
     GtkWidget *buy_drop_entry;
     GtkWidget *sell_profit_entry;
+    GtkWidget *estimated_fee_entry;
+    GtkWidget *min_profit_eur_entry;
+    GtkWidget *min_profit_percent_entry;
     GtkWidget *min_liquidity_entry;
     GtkWidget *max_slots_entry;
+    GtkWidget *audit_retention_days_entry;
     GtkWidget *runtime_mode_dropdown;
 
     GtkWidget *coinbase_api_key_entry;
@@ -191,6 +216,50 @@ static void refresh_trade_history(AppWidgets *widgets) {
     }
 }
 
+static void refresh_engine_audit(AppWidgets *widgets) {
+    EngineAuditRecord records[ENGINE_AUDIT_LIMIT];
+    int count = db_get_recent_engine_audits(records, ENGINE_AUDIT_LIMIT);
+
+    clear_trade_list(widgets->audit_list);
+
+    if (count == 0) {
+        GtkWidget *row_label = gtk_label_new("Nessuna decisione motore registrata");
+        gtk_widget_set_halign(row_label, GTK_ALIGN_START);
+        gtk_list_box_append(GTK_LIST_BOX(widgets->audit_list), row_label);
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        char row_text[512];
+
+        snprintf(
+            row_text,
+            sizeof(row_text),
+            "#%d | %s | %s | prezzo %.2f | BTC %.8f | EUR %.2f | fee %.2f | profit %.2f | %s | %s",
+            records[i].id,
+            records[i].event_type,
+            records[i].decision,
+            records[i].price,
+            records[i].btc_amount,
+            records[i].eur_amount,
+            records[i].estimated_fee,
+            records[i].net_profit,
+            records[i].created_at,
+            records[i].reason
+        );
+
+        GtkWidget *row_label = gtk_label_new(row_text);
+        gtk_widget_set_halign(row_label, GTK_ALIGN_START);
+        gtk_label_set_wrap(GTK_LABEL(row_label), TRUE);
+        gtk_widget_set_margin_top(row_label, 4);
+        gtk_widget_set_margin_bottom(row_label, 4);
+        gtk_widget_set_margin_start(row_label, 6);
+        gtk_widget_set_margin_end(row_label, 6);
+
+        gtk_list_box_append(GTK_LIST_BOX(widgets->audit_list), row_label);
+    }
+}
+
 static void refresh_dashboard(AppWidgets *widgets) {
     StrategySettings settings = settings_load();
 
@@ -201,7 +270,7 @@ static void refresh_dashboard(AppWidgets *widgets) {
     char mode_text[100];
     char runtime_mode_text[100];
     char last_trade_text[256];
-    char settings_text[320];
+    char settings_text[512];
 
     snprintf(price_text, sizeof(price_text), "BTC-EUR: %.2f €", widgets->state->current_price);
     snprintf(eur_text, sizeof(eur_text), "EUR disponibili: %.2f", widgets->state->eur_balance);
@@ -213,12 +282,16 @@ static void refresh_dashboard(AppWidgets *widgets) {
     snprintf(
         settings_text,
         sizeof(settings_text),
-        "Strategia: slot %.2f € | buy drop %.2f%% | sell profit %.2f%% | liquidità min %.2f%% | max slot %d",
+        "Strategia: slot %.2f € | buy drop %.2f%% | sell %.2f%% | fee stimata %.2f%% | min profit %.2f € / %.2f%% | liquidità %.2f%% | max slot %d | audit %d giorni",
         settings.slot_amount_eur,
         settings.buy_drop_percent,
         settings.sell_profit_percent,
+        settings.estimated_fee_percent,
+        settings.min_profit_eur,
+        settings.min_profit_percent,
         settings.min_liquidity_percent,
-        settings.max_slots
+        settings.max_slots,
+        settings.audit_retention_days
     );
 
     gtk_label_set_text(GTK_LABEL(widgets->price_label), price_text);
@@ -234,6 +307,7 @@ static void refresh_dashboard(AppWidgets *widgets) {
     refresh_coinbase_credentials_status(widgets);
     refresh_remote_wallet_status(widgets);
     refresh_trade_history(widgets);
+    refresh_engine_audit(widgets);
 }
 
 static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
@@ -264,11 +338,23 @@ static void fill_settings_entries(AppWidgets *widgets) {
     snprintf(buffer, sizeof(buffer), "%.2f", settings.sell_profit_percent);
     gtk_editable_set_text(GTK_EDITABLE(widgets->sell_profit_entry), buffer);
 
+    snprintf(buffer, sizeof(buffer), "%.2f", settings.estimated_fee_percent);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->estimated_fee_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%.2f", settings.min_profit_eur);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->min_profit_eur_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%.2f", settings.min_profit_percent);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->min_profit_percent_entry), buffer);
+
     snprintf(buffer, sizeof(buffer), "%.2f", settings.min_liquidity_percent);
     gtk_editable_set_text(GTK_EDITABLE(widgets->min_liquidity_entry), buffer);
 
     snprintf(buffer, sizeof(buffer), "%d", settings.max_slots);
     gtk_editable_set_text(GTK_EDITABLE(widgets->max_slots_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%d", settings.audit_retention_days);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->audit_retention_days_entry), buffer);
 
     gtk_drop_down_set_selected(
         GTK_DROP_DOWN(widgets->runtime_mode_dropdown),
@@ -352,19 +438,31 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
     StrategySettings settings;
 
     settings.slot_amount_eur =
-        atof(gtk_editable_get_text(GTK_EDITABLE(widgets->slot_amount_entry)));
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->slot_amount_entry)));
 
     settings.buy_drop_percent =
-        atof(gtk_editable_get_text(GTK_EDITABLE(widgets->buy_drop_entry)));
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->buy_drop_entry)));
 
     settings.sell_profit_percent =
-        atof(gtk_editable_get_text(GTK_EDITABLE(widgets->sell_profit_entry)));
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->sell_profit_entry)));
+
+    settings.estimated_fee_percent =
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->estimated_fee_entry)));
+
+    settings.min_profit_eur =
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->min_profit_eur_entry)));
+
+    settings.min_profit_percent =
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->min_profit_percent_entry)));
 
     settings.min_liquidity_percent =
-        atof(gtk_editable_get_text(GTK_EDITABLE(widgets->min_liquidity_entry)));
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->min_liquidity_entry)));
 
     settings.max_slots =
         atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->max_slots_entry)));
+
+    settings.audit_retention_days =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->audit_retention_days_entry)));
 
     settings.runtime_mode =
         get_selected_runtime_mode(widgets->runtime_mode_dropdown);
@@ -373,9 +471,14 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
         settings.slot_amount_eur <= 0.0 ||
         settings.buy_drop_percent <= 0.0 ||
         settings.sell_profit_percent <= 0.0 ||
+        settings.estimated_fee_percent < 0.0 ||
+        settings.estimated_fee_percent >= 100.0 ||
+        settings.min_profit_eur < 0.0 ||
+        settings.min_profit_percent < 0.0 ||
         settings.min_liquidity_percent < 0.0 ||
         settings.min_liquidity_percent >= 100.0 ||
-        settings.max_slots <= 0
+        settings.max_slots <= 0 ||
+        settings.audit_retention_days <= 0
     ) {
         gtk_label_set_text(
             GTK_LABEL(widgets->status_label),
@@ -477,8 +580,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *slot_amount_entry;
     GtkWidget *buy_drop_entry;
     GtkWidget *sell_profit_entry;
+    GtkWidget *estimated_fee_entry;
+    GtkWidget *min_profit_eur_entry;
+    GtkWidget *min_profit_percent_entry;
     GtkWidget *min_liquidity_entry;
     GtkWidget *max_slots_entry;
+    GtkWidget *audit_retention_days_entry;
     GtkWidget *runtime_mode_dropdown;
     GtkWidget *save_settings_button;
 
@@ -490,7 +597,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
 
     GtkWidget *history_title;
     GtkWidget *trade_list;
+    GtkWidget *audit_title;
+    GtkWidget *audit_list;
     GtkWidget *scrolled_window;
+    GtkWidget *audit_scrolled_window;
 
     char price_text[100];
     char eur_text[100];
@@ -565,8 +675,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     slot_amount_entry = gtk_entry_new();
     buy_drop_entry = gtk_entry_new();
     sell_profit_entry = gtk_entry_new();
+    estimated_fee_entry = gtk_entry_new();
+    min_profit_eur_entry = gtk_entry_new();
+    min_profit_percent_entry = gtk_entry_new();
     min_liquidity_entry = gtk_entry_new();
     max_slots_entry = gtk_entry_new();
+    audit_retention_days_entry = gtk_entry_new();
 
     const char *runtime_modes[] = {
         "SIMULATION",
@@ -581,9 +695,13 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
 
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Slot EUR", slot_amount_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Buy drop %", buy_drop_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Sell profit %", sell_profit_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Sell profit lordo %", sell_profit_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Fee stimata %", estimated_fee_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Profitto minimo EUR", min_profit_eur_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Profitto minimo %", min_profit_percent_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Liquidità min %", min_liquidity_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Max slot", max_slots_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Conserva audit giorni", audit_retention_days_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Modalità operativa", runtime_mode_dropdown));
     gtk_box_append(GTK_BOX(settings_box), save_settings_button);
 
@@ -620,6 +738,17 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_vexpand(scrolled_window, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), trade_list);
 
+    audit_title = gtk_label_new("Audit decisioni motore - più recenti in alto");
+    gtk_widget_add_css_class(audit_title, "title-3");
+    gtk_widget_set_halign(audit_title, GTK_ALIGN_START);
+
+    audit_list = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(audit_list), GTK_SELECTION_NONE);
+
+    audit_scrolled_window = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(audit_scrolled_window, TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(audit_scrolled_window), audit_list);
+
     gtk_box_append(GTK_BOX(top_box), title);
     gtk_box_append(GTK_BOX(top_box), price_label);
     gtk_box_append(GTK_BOX(top_box), eur_label);
@@ -639,6 +768,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(main_box), coinbase_expander);
     gtk_box_append(GTK_BOX(main_box), history_title);
     gtk_box_append(GTK_BOX(main_box), scrolled_window);
+    gtk_box_append(GTK_BOX(main_box), audit_title);
+    gtk_box_append(GTK_BOX(main_box), audit_scrolled_window);
 
     AppWidgets *widgets = g_malloc(sizeof(AppWidgets));
     widgets->state = state;
@@ -654,11 +785,16 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->settings_label = settings_label;
     widgets->status_label = status_label;
     widgets->trade_list = trade_list;
+    widgets->audit_list = audit_list;
     widgets->slot_amount_entry = slot_amount_entry;
     widgets->buy_drop_entry = buy_drop_entry;
     widgets->sell_profit_entry = sell_profit_entry;
+    widgets->estimated_fee_entry = estimated_fee_entry;
+    widgets->min_profit_eur_entry = min_profit_eur_entry;
+    widgets->min_profit_percent_entry = min_profit_percent_entry;
     widgets->min_liquidity_entry = min_liquidity_entry;
     widgets->max_slots_entry = max_slots_entry;
+    widgets->audit_retention_days_entry = audit_retention_days_entry;
     widgets->runtime_mode_dropdown = runtime_mode_dropdown;
     widgets->coinbase_api_key_entry = coinbase_api_key_entry;
     widgets->coinbase_api_secret_entry = coinbase_api_secret_entry;

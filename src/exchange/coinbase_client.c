@@ -19,6 +19,12 @@
 #define COINBASE_ACCOUNTS_PATH \
     "/api/v3/brokerage/accounts"
 
+#define COINBASE_FILLS_URL \
+    "https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?product_id=BTC-EUR&limit=100"
+
+#define COINBASE_FILLS_PATH \
+    "/api/v3/brokerage/orders/historical/fills"
+
 typedef struct {
     char *memory;
     size_t size;
@@ -239,6 +245,264 @@ static double parse_account_balance(cJSON *account) {
         parse_money_object(cJSON_GetObjectItem(account, "balance"));
 
     return balance;
+}
+
+
+static double parse_fill_fee_eur(cJSON *fill) {
+    double fee = 0.0;
+
+    fee += parse_decimal_item(cJSON_GetObjectItem(fill, "commission"));
+    fee += parse_decimal_item(cJSON_GetObjectItem(fill, "fee"));
+
+    cJSON *commission_detail = cJSON_GetObjectItem(fill, "commission_detail_total");
+    if (commission_detail && cJSON_IsObject(commission_detail)) {
+        fee += parse_money_object(commission_detail);
+    }
+
+    return fee;
+}
+
+typedef struct {
+    double btc;
+    double cost_eur;
+} OpenLot;
+
+static void fifo_reduce_lots(OpenLot *lots, int lot_count, double sell_btc) {
+    for (int i = 0; i < lot_count && sell_btc > 0.0; i++) {
+        if (lots[i].btc <= 0.0) {
+            continue;
+        }
+
+        if (lots[i].btc <= sell_btc) {
+            sell_btc -= lots[i].btc;
+            lots[i].btc = 0.0;
+            lots[i].cost_eur = 0.0;
+        } else {
+            double ratio = sell_btc / lots[i].btc;
+            lots[i].cost_eur -= lots[i].cost_eur * ratio;
+            lots[i].btc -= sell_btc;
+            sell_btc = 0.0;
+        }
+    }
+}
+
+static void process_fill_for_position(cJSON *fill, OpenLot *lots, int *lot_count, CoinbasePositionSummary *summary) {
+    const char *side = json_string_value(cJSON_GetObjectItem(fill, "side"));
+
+    if (!side) {
+        return;
+    }
+
+    double price = parse_decimal_item(cJSON_GetObjectItem(fill, "price"));
+    double size = parse_decimal_item(cJSON_GetObjectItem(fill, "size"));
+    double fee = parse_fill_fee_eur(fill);
+
+    if (price <= 0.0 || size <= 0.0) {
+        return;
+    }
+
+    summary->fill_count++;
+
+    if (strcmp(side, "BUY") == 0) {
+        double gross_cost = size * price;
+        double real_cost = gross_cost + fee;
+
+        if (*lot_count < 256) {
+            lots[*lot_count].btc = size;
+            lots[*lot_count].cost_eur = real_cost;
+            (*lot_count)++;
+        }
+
+        summary->total_buy_fees_eur += fee;
+    } else if (strcmp(side, "SELL") == 0) {
+        fifo_reduce_lots(lots, *lot_count, size);
+        summary->total_sell_fees_eur += fee;
+    }
+}
+
+static cJSON *extract_fills_array(cJSON *json) {
+    cJSON *fills = cJSON_GetObjectItem(json, "fills");
+
+    if (fills && cJSON_IsArray(fills)) {
+        return fills;
+    }
+
+    cJSON *data = cJSON_GetObjectItem(json, "data");
+    if (data && cJSON_IsObject(data)) {
+        fills = cJSON_GetObjectItem(data, "fills");
+        if (fills && cJSON_IsArray(fills)) {
+            return fills;
+        }
+    }
+
+    return NULL;
+}
+
+CoinbasePositionSummary coinbase_get_btc_eur_position_summary_readonly(void) {
+    CoinbasePositionSummary summary = {0};
+
+    /*
+     * Se Coinbase risponde 401/403 sui fills, non continuiamo a richiamare
+     * l'endpoint a ogni tick: la UI resta fluida e il wallet sync continua.
+     * Il flag si resetta al prossimo avvio dell'applicazione.
+     */
+    static int disabled_after_auth_error = 0;
+    static int auth_error_already_reported = 0;
+    static int generic_error_already_reported = 0;
+
+    if (disabled_after_auth_error) {
+        return summary;
+    }
+
+    CoinbaseCredentials credentials = env_load_coinbase_credentials();
+
+    if (!credentials.loaded) {
+        return summary;
+    }
+
+    char *jwt_token = coinbase_build_rest_jwt(
+        "GET",
+        COINBASE_FILLS_PATH,
+        credentials.api_key,
+        credentials.api_secret
+    );
+
+    if (!jwt_token) {
+        return summary;
+    }
+
+    CURL *curl = curl_easy_init();
+
+    if (!curl) {
+        free(jwt_token);
+        return summary;
+    }
+
+    HttpResponse response;
+
+    if (!http_response_init(&response)) {
+        curl_easy_cleanup(curl);
+        free(jwt_token);
+        return summary;
+    }
+
+    struct curl_slist *headers = NULL;
+    char auth_header[4096];
+
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", jwt_token);
+
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, COINBASE_FILLS_URL);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Helix/0.1");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+
+    CURLcode result = curl_easy_perform(curl);
+
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (result != CURLE_OK || http_code < 200 || http_code >= 300) {
+        if (http_code == 401 || http_code == 403) {
+            disabled_after_auth_error = 1;
+
+            if (!auth_error_already_reported) {
+                fprintf(
+                    stderr,
+                    "Coinbase fills disabled: endpoint non autorizzato "
+                    "o JWT non accettato per fills (http=%ld). "
+                    "Wallet read-only continuerà a funzionare.\n",
+                    http_code
+                );
+                auth_error_already_reported = 1;
+            }
+        } else if (!generic_error_already_reported) {
+            fprintf(
+                stderr,
+                "Coinbase fills warning: curl=%d http=%ld. "
+                "Uso fallback wallet read-only.\n",
+                result,
+                http_code
+            );
+            generic_error_already_reported = 1;
+        }
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        http_response_free(&response);
+        free(jwt_token);
+        return summary;
+    }
+
+    cJSON *json = cJSON_Parse(response.memory);
+
+    if (!json) {
+        if (!generic_error_already_reported) {
+            fprintf(
+                stderr,
+                "Coinbase fills warning: JSON non valido. "
+                "Uso fallback wallet read-only.\n"
+            );
+            generic_error_already_reported = 1;
+        }
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        http_response_free(&response);
+        free(jwt_token);
+        return summary;
+    }
+
+    cJSON *fills = extract_fills_array(json);
+
+    if (fills && cJSON_IsArray(fills)) {
+        int count = cJSON_GetArraySize(fills);
+        OpenLot lots[256];
+        int lot_count = 0;
+
+        memset(lots, 0, sizeof(lots));
+
+        /* Coinbase normalmente restituisce i fill più recenti prima.
+         * Per ricostruire il costo con FIFO li processiamo dal più vecchio
+         * al più recente.
+         */
+        for (int i = count - 1; i >= 0; i--) {
+            cJSON *fill = cJSON_GetArrayItem(fills, i);
+            if (fill && cJSON_IsObject(fill)) {
+                process_fill_for_position(fill, lots, &lot_count, &summary);
+            }
+        }
+
+        for (int i = 0; i < lot_count; i++) {
+            summary.btc_open += lots[i].btc;
+            summary.cost_basis_eur += lots[i].cost_eur;
+        }
+
+        if (summary.btc_open > 0.0) {
+            summary.avg_buy_price = summary.cost_basis_eur / summary.btc_open;
+        }
+
+        summary.connected = 1;
+    } else if (!generic_error_already_reported) {
+        fprintf(
+            stderr,
+            "Coinbase fills warning: array fills non trovato. "
+            "Uso fallback wallet read-only.\n"
+        );
+        generic_error_already_reported = 1;
+    }
+
+    cJSON_Delete(json);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    http_response_free(&response);
+    free(jwt_token);
+
+    return summary;
 }
 
 WalletInfo coinbase_get_wallet_info_readonly(void) {

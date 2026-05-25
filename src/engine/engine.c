@@ -1,12 +1,120 @@
 #include "engine.h"
 #include "wallet.h"
 #include "settings.h"
+#include "trade_preview.h"
 #include "../db/database.h"
 #include "../market/market_data.h"
 #include "../wallet/wallet_info.h"
 #include "../exchange/coinbase_client.h"
 
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+#define AUDIT_COOLDOWN_SECONDS 300
+#define AUDIT_CLEANUP_INTERVAL_SECONDS 3600
+
+static int is_high_priority_audit_event(const char *event_type, const char *decision) {
+    if (decision && (
+        strcmp(decision, "ALLOWED_SIMULATED") == 0 ||
+        strcmp(decision, "ERROR") == 0 ||
+        strcmp(decision, "BLOCKED") == 0
+    )) {
+        return 1;
+    }
+
+    if (event_type && (
+        strcmp(event_type, "LIVE_TRADING") == 0 ||
+        strcmp(event_type, "BUY_PREVIEW") == 0 ||
+        strcmp(event_type, "SELL_PREVIEW") == 0
+    )) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static void audit_engine_decision(
+    const char *event_type,
+    const char *decision,
+    const char *reason,
+    double price,
+    double btc_amount,
+    double eur_amount,
+    double estimated_fee,
+    double net_profit
+) {
+    static char last_signature[512] = "";
+    static time_t last_insert_time = 0;
+    char signature[512];
+    time_t now = time(NULL);
+    int same_signature;
+    int high_priority;
+
+    snprintf(
+        signature,
+        sizeof(signature),
+        "%s|%s|%s",
+        event_type ? event_type : "",
+        decision ? decision : "",
+        reason ? reason : ""
+    );
+
+    same_signature = strcmp(signature, last_signature) == 0;
+    high_priority = is_high_priority_audit_event(event_type, decision);
+
+    /*
+     * Regola anti-spam:
+     * - se la decisione è identica alla precedente, non riscrivere ogni tick;
+     * - per gli eventi importanti permettiamo comunque un nuovo log dopo 5 minuti;
+     * - per stati ripetitivi tipo SYNC/WAITING, logghiamo solo quando cambia il messaggio.
+     */
+    if (same_signature) {
+        if (!high_priority) {
+            return;
+        }
+
+        if (last_insert_time > 0 && difftime(now, last_insert_time) < AUDIT_COOLDOWN_SECONDS) {
+            return;
+        }
+    }
+
+    snprintf(last_signature, sizeof(last_signature), "%s", signature);
+    last_insert_time = now;
+
+    db_log_engine_audit(
+        event_type,
+        decision,
+        reason,
+        price,
+        btc_amount,
+        eur_amount,
+        estimated_fee,
+        net_profit
+    );
+}
+
+static void audit_engine_cleanup_if_needed(StrategySettings *settings) {
+    static time_t last_cleanup_time = 0;
+    time_t now = time(NULL);
+    int retention_days;
+
+    if (settings == NULL) {
+        return;
+    }
+
+    retention_days = settings->audit_retention_days;
+    if (retention_days <= 0) {
+        retention_days = 60;
+    }
+
+    if (last_cleanup_time > 0 && difftime(now, last_cleanup_time) < AUDIT_CLEANUP_INTERVAL_SECONDS) {
+        return;
+    }
+
+    db_prune_engine_audits(retention_days);
+    last_cleanup_time = now;
+}
 
 static int price_dropped_enough(BotState *state, StrategySettings *settings) {
     if (state->last_buy_price <= 0.0) {
@@ -30,9 +138,61 @@ static int price_high_enough_to_sell(BotState *state, StrategySettings *settings
     return state->current_price >= target_price;
 }
 
-static void sync_state_from_remote_wallet(BotState *state, WalletInfo *remote_wallet) {
+static double estimate_fee_rate(StrategySettings *settings) {
+    if (settings->estimated_fee_percent <= 0.0) {
+        return 0.0;
+    }
+
+    return settings->estimated_fee_percent / 100.0;
+}
+
+static double current_cost_basis(BotState *state) {
+    if (state->btc_balance <= 0.0 || state->avg_buy_price <= 0.0) {
+        return 0.0;
+    }
+
+    return state->btc_balance * state->avg_buy_price;
+}
+
+static void apply_simulated_sell_all(BotState *state, TradePreview *preview) {
+    state->eur_balance += preview->net_value;
+    state->btc_balance = 0.0;
+    state->used_slots = 0;
+    state->last_buy_price = 0.0;
+    state->avg_buy_price = 0.0;
+}
+
+static void apply_simulated_buy(BotState *state, double eur_amount, TradePreview *preview) {
+    double old_cost_basis = current_cost_basis(state);
+    double new_btc_total = state->btc_balance + preview->net_value;
+    double new_cost_basis = old_cost_basis + eur_amount;
+
+    state->eur_balance -= eur_amount;
+    state->btc_balance = new_btc_total;
+    state->used_slots++;
+    state->last_buy_price = state->current_price;
+
+    if (new_btc_total > 0.0) {
+        state->avg_buy_price = new_cost_basis / new_btc_total;
+    }
+}
+
+static void sync_state_from_remote_wallet(
+    BotState *state,
+    WalletInfo *remote_wallet,
+    CoinbasePositionSummary *position_summary
+) {
     state->eur_balance = remote_wallet->eur_balance;
     state->btc_balance = remote_wallet->btc_balance;
+
+    if (
+        position_summary &&
+        position_summary->connected &&
+        position_summary->btc_open > 0.0 &&
+        position_summary->avg_buy_price > 0.0
+    ) {
+        state->avg_buy_price = position_summary->avg_buy_price;
+    }
 
     if (state->btc_balance > 0.0) {
         if (state->eur_balance < 1.0) {
@@ -43,11 +203,21 @@ static void sync_state_from_remote_wallet(BotState *state, WalletInfo *remote_wa
 
         state->mode = BOT_MODE_WAITING_SELL;
 
-        snprintf(
-            state->last_trade,
-            sizeof(state->last_trade),
-            "LIVE_READONLY sync: posizione BTC rilevata"
-        );
+        if (position_summary && position_summary->connected && state->avg_buy_price > 0.0) {
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "LIVE_READONLY sync: BTC rilevato | avg %.2f EUR | cost %.2f EUR",
+                state->avg_buy_price,
+                position_summary->cost_basis_eur
+            );
+        } else {
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "LIVE_READONLY sync: posizione BTC rilevata, costo non ricostruito"
+            );
+        }
     } else {
         state->used_slots = 0;
         state->mode = BOT_MODE_READY;
@@ -63,6 +233,8 @@ static void sync_state_from_remote_wallet(BotState *state, WalletInfo *remote_wa
 void helix_engine_tick(BotState *state) {
     StrategySettings settings = settings_load();
 
+    audit_engine_cleanup_if_needed(&settings);
+
     if (!state->running) {
         state->mode = BOT_MODE_PAUSED;
         return;
@@ -75,8 +247,22 @@ void helix_engine_tick(BotState *state) {
         WalletInfo remote_wallet =
             coinbase_get_wallet_info_readonly();
 
+        CoinbasePositionSummary position_summary =
+            coinbase_get_btc_eur_position_summary_readonly();
+
         if (remote_wallet.connected) {
-            sync_state_from_remote_wallet(state, &remote_wallet);
+            sync_state_from_remote_wallet(state, &remote_wallet, &position_summary);
+
+            audit_engine_decision(
+                "LIVE_READONLY",
+                "SYNC",
+                state->last_trade,
+                state->current_price,
+                state->btc_balance,
+                state->eur_balance,
+                0.0,
+                0.0
+            );
         } else {
             state->mode = BOT_MODE_ERROR;
 
@@ -84,6 +270,17 @@ void helix_engine_tick(BotState *state) {
                 state->last_trade,
                 sizeof(state->last_trade),
                 "LIVE_READONLY errore: wallet remoto non connesso"
+            );
+
+            audit_engine_decision(
+                "LIVE_READONLY",
+                "ERROR",
+                state->last_trade,
+                state->current_price,
+                state->btc_balance,
+                state->eur_balance,
+                0.0,
+                0.0
             );
         }
 
@@ -99,6 +296,17 @@ void helix_engine_tick(BotState *state) {
             "LIVE_TRADING bloccato: safety checks mancanti"
         );
 
+        audit_engine_decision(
+            "LIVE_TRADING",
+            "BLOCKED",
+            state->last_trade,
+            state->current_price,
+            state->btc_balance,
+            state->eur_balance,
+            0.0,
+            0.0
+        );
+
         return;
     }
 
@@ -108,26 +316,73 @@ void helix_engine_tick(BotState *state) {
         wallet_can_sell(state) &&
         price_high_enough_to_sell(state, &settings)
     ) {
-        double eur_before = state->eur_balance;
         double btc_before = state->btc_balance;
         double price = state->current_price;
+        double cost_basis = current_cost_basis(state);
+
+        TradePreview preview = trade_preview_sell(
+            btc_before,
+            price,
+            cost_basis,
+            estimate_fee_rate(&settings),
+            settings.min_profit_eur,
+            settings.min_profit_percent
+        );
+
+        if (!preview.allowed) {
+            state->mode = BOT_MODE_WAITING_SELL;
+
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "SELL preview bloccata: netto %.2f | profit %.2f EUR %.2f%%",
+                preview.net_value,
+                preview.net_profit,
+                preview.net_profit_percent
+            );
+
+            audit_engine_decision(
+                "SELL_PREVIEW",
+                "BLOCKED",
+                state->last_trade,
+                price,
+                btc_before,
+                preview.net_value,
+                preview.estimated_fee,
+                preview.net_profit
+            );
+
+            return;
+        }
 
         state->mode = BOT_MODE_SELLING;
 
-        wallet_sell_all(state);
+        apply_simulated_sell_all(state, &preview);
 
         snprintf(
             state->last_trade,
             sizeof(state->last_trade),
-            "SELL @ %.2f",
-            price
+            "SELL preview OK @ %.2f | profit %.2f EUR",
+            price,
+            preview.net_profit
         );
 
         db_log_trade(
             "SELL",
             price,
-            state->eur_balance - eur_before,
+            preview.net_value,
             btc_before
+        );
+
+        audit_engine_decision(
+            "SELL_PREVIEW",
+            "ALLOWED_SIMULATED",
+            state->last_trade,
+            price,
+            btc_before,
+            preview.net_value,
+            preview.estimated_fee,
+            preview.net_profit
         );
 
         state->mode = BOT_MODE_READY;
@@ -145,22 +400,63 @@ void helix_engine_tick(BotState *state) {
     ) {
         double price = state->current_price;
 
+        TradePreview preview = trade_preview_buy(
+            settings.slot_amount_eur,
+            price,
+            estimate_fee_rate(&settings)
+        );
+
+        if (!preview.allowed) {
+            state->mode = BOT_MODE_READY;
+
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "BUY preview bloccata: fee stimata non valida"
+            );
+
+            audit_engine_decision(
+                "BUY_PREVIEW",
+                "BLOCKED",
+                state->last_trade,
+                price,
+                preview.net_value,
+                settings.slot_amount_eur,
+                preview.estimated_fee,
+                0.0
+            );
+
+            return;
+        }
+
         state->mode = BOT_MODE_BUYING;
 
-        wallet_buy(state, settings.slot_amount_eur);
+        apply_simulated_buy(state, settings.slot_amount_eur, &preview);
 
         snprintf(
             state->last_trade,
             sizeof(state->last_trade),
-            "BUY @ %.2f",
-            price
+            "BUY preview OK @ %.2f | fee %.2f EUR",
+            price,
+            preview.estimated_fee
         );
 
         db_log_trade(
             "BUY",
             price,
             settings.slot_amount_eur,
-            settings.slot_amount_eur / price
+            preview.net_value
+        );
+
+        audit_engine_decision(
+            "BUY_PREVIEW",
+            "ALLOWED_SIMULATED",
+            state->last_trade,
+            price,
+            preview.net_value,
+            settings.slot_amount_eur,
+            preview.estimated_fee,
+            0.0
         );
 
         state->mode = BOT_MODE_WAITING_SELL;
