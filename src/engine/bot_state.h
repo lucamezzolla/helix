@@ -20,6 +20,7 @@ typedef struct {
     double current_price;
     double last_buy_price;
     double avg_buy_price;
+    char last_trade[128];
     int used_slots;
     int max_slots;
 } BotState;

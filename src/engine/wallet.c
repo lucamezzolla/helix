@@ -1,11 +1,46 @@
 #include "wallet.h"
 
-int wallet_can_buy(BotState *state, double amount) {
+static double wallet_total_value_eur(BotState *state) {
+    double btc_value = 0.0;
+
+    if (state->current_price > 0.0) {
+        btc_value = state->btc_balance * state->current_price;
+    }
+
+    return state->eur_balance + btc_value;
+}
+
+static int wallet_respects_min_liquidity(
+    BotState *state,
+    double amount,
+    double min_liquidity_percent
+) {
+    double total_value = wallet_total_value_eur(state);
+
+    if (total_value <= 0.0) {
+        return 0;
+    }
+
+    double eur_after_buy = state->eur_balance - amount;
+    double min_eur_required = total_value * (min_liquidity_percent / 100.0);
+
+    return eur_after_buy >= min_eur_required;
+}
+
+int wallet_can_buy(
+    BotState *state,
+    double amount,
+    double min_liquidity_percent
+) {
     if (state->used_slots >= state->max_slots) {
         return 0;
     }
 
     if (state->eur_balance < amount) {
+        return 0;
+    }
+
+    if (!wallet_respects_min_liquidity(state, amount, min_liquidity_percent)) {
         return 0;
     }
 

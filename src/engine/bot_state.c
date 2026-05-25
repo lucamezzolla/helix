@@ -1,4 +1,5 @@
 #include "bot_state.h"
+#include <string.h>
 
 BotState bot_state_default(void) {
     BotState state;
@@ -10,6 +11,7 @@ BotState bot_state_default(void) {
     state.current_price = 0.0;
     state.last_buy_price = 0.0;
     state.avg_buy_price = 0.0;
+    strcpy(state.last_trade, "Nessuna operazione");
     state.used_slots = 0;
     state.max_slots = 6;
 

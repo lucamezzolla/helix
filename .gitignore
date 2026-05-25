@@ -1,21 +1,22 @@
-# Binario compilato
+# Binary
 helix
 
-# Database SQLite
+# SQLite
 data/*.db
+data/*.db-shm
+data/*.db-wal
 
-# Build temporanee
+# Build
 *.o
 *.out
 
-# Archivi
-*.7z
+# Archives
 *.zip
-*.tar.gz
 
-# Editor
+# IDE
 .vscode/
 .idea/
 
-# Sistema
-.DS_Store
+# Secrets
+.env
+*.secret
