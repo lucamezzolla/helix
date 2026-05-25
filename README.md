@@ -1,72 +1,75 @@
 # Helix
 
-**Helix** is a C/GTK4 desktop application that started as a learning project and is evolving into a small automated BTC-EUR trading engine.
+**Helix** is a C/GTK4 desktop application for studying and building a cautious BTC-EUR trading engine.
 
-The current version is intentionally conservative: it supports simulation, persistent state, configurable strategy parameters, trade history, and Coinbase read-only market data. Real trading is not enabled yet.
+It currently supports simulation, persistent local state, configurable strategy parameters, Coinbase read-only market data, and Coinbase authenticated read-only wallet synchronization.
+
+Real trading is intentionally disabled.
 
 ---
 
-## Project status
-
-Helix is currently in an early development phase.
+## Current status
 
 Implemented:
 
 - GTK4 desktop dashboard
-- SQLite persistence
+- expandable UI sections for strategy and Coinbase API settings
+- SQLite persistence and state recovery
 - automatic engine loop
-- simulated trading mode
-- Coinbase BTC-EUR read-only price fetch
-- strategy settings saved in SQLite
-- wallet state recovery after restart
+- simulated BUY/SELL mode
 - trade history journal
+- configurable strategy settings
+- minimum liquidity guard
+- slot-based strategy model
+- Coinbase BTC-EUR public spot price
+- Coinbase authenticated read-only wallet sync
+- JWT authentication for Coinbase Advanced Trade / CDP API
 - runtime modes:
   - `SIMULATION`
   - `LIVE_READONLY`
   - `LIVE_TRADING` placeholder, intentionally blocked
-- minimum liquidity guard
-- slot-based buying strategy
-- average buy price tracking
-- automatic sell condition in simulation mode
 
 Not implemented yet:
 
-- Coinbase authenticated wallet sync
-- Coinbase real orders
-- real trading execution
-- fee/slippage-aware order preview
-- reconciliation between local state and Coinbase
-- background daemon/systemd service
-- multi-threaded engine
+- real Coinbase BUY/SELL orders
+- Coinbase fills/order history reconstruction
+- real average buy price reconstruction
+- fee/slippage-aware sell target
+- emergency stop layer
+- anti double-order protection
+- background daemon/systemd mode
 
 ---
 
 ## Safety note
 
-Helix is not financial advice and should not be used with real funds in its current state.
+Helix is **not financial advice**.
 
-The `LIVE_TRADING` mode exists only as a UI/runtime placeholder and is blocked by the engine until proper safety checks are implemented.
+The current code can read Coinbase wallet balances in read-only mode, but it must not be used for real trading yet.
 
-Before any real trading, Helix must support:
+`LIVE_TRADING` exists in the UI only as a future runtime mode and is blocked by the engine.
 
-- API key security
-- read-only wallet synchronization
-- local/remote state reconciliation
+Before real trading, Helix must support:
+
+- strict safety layer
 - order preview
-- fee calculation
-- minimum liquidity enforcement
-- emergency stop
+- maximum order size
+- cooldown between orders
+- fee-aware calculations
 - persistent order journal
-- error handling and retry logic
+- reconciliation between Coinbase and SQLite
+- emergency stop
+- strong error handling
 
 ---
 
-## Current architecture
+## Project structure
 
 ```text
 helix/
 ├── Makefile
 ├── README.md
+├── .gitignore
 ├── src/
 │   ├── main.c
 │   ├── ui/
@@ -87,59 +90,41 @@ helix/
 │   ├── market/
 │   │   ├── market_data.c
 │   │   └── market_data.h
-│   └── exchange/
-│       ├── coinbase_client.c
-│       └── coinbase_client.h
+│   ├── exchange/
+│   │   ├── coinbase_auth.c
+│   │   ├── coinbase_auth.h
+│   │   ├── coinbase_client.c
+│   │   └── coinbase_client.h
+│   ├── config/
+│   │   ├── env_loader.c
+│   │   └── env_loader.h
+│   └── wallet/
+│       ├── wallet_info.c
+│       └── wallet_info.h
 └── data/
-    └── helix.db
 ```
 
 ---
 
-## Main concepts
-
-### Bot state
-
-Helix keeps its runtime state in memory using `BotState`, then persists it to SQLite.
-
-The state includes:
-
-- running/stopped flag
-- engine mode
-- EUR balance
-- BTC balance
-- current BTC-EUR price
-- last buy price
-- average buy price
-- last trade description
-- used slots
-- max slots
-
-This allows Helix to recover after closing or restarting the application.
-
----
-
-### Runtime modes
-
-Helix supports three runtime modes:
+## Runtime modes
 
 | Mode | Description |
 |---|---|
 | `SIMULATION` | Uses simulated price movement and virtual BUY/SELL operations |
-| `LIVE_READONLY` | Reads BTC-EUR spot price from Coinbase without trading |
+| `LIVE_READONLY` | Reads real Coinbase price and real Coinbase EUR/BTC balances without trading |
 | `LIVE_TRADING` | Present but intentionally blocked |
 
 ---
 
-### Strategy settings
+## Strategy settings
 
-Strategy parameters are saved in SQLite and can be edited from the GTK4 interface:
+The strategy can be configured from the GTK4 interface:
 
 - slot amount in EUR
 - buy drop percentage
 - sell profit percentage
 - minimum liquidity percentage
-- maximum number of slots
+- max slots
 - runtime mode
 
 Default values:
@@ -155,27 +140,48 @@ runtime mode:          SIMULATION
 
 ---
 
-### Minimum liquidity guard
+## Coinbase read-only mode
 
-Helix does not buy if the operation would leave EUR liquidity below the configured minimum percentage of the estimated wallet value.
+In `LIVE_READONLY`, Helix uses Coinbase only to read:
 
-Example:
+- BTC-EUR spot price
+- EUR balance
+- BTC balance
+
+It does **not** place orders.
+
+When Helix detects BTC and almost no EUR, it models the state as a fully allocated BTC position:
 
 ```text
-Estimated wallet value: 1000 EUR
-Minimum liquidity:      25%
-Required EUR reserve:   250 EUR
+Slot used: max / max
+Mode: WAITING_SELL
 ```
 
-If a BUY would reduce EUR below the reserve, Helix skips the operation.
+This does not mean Helix knows the historical entry price yet. That will require reading fills/order history in a future step.
 
 ---
 
-### Trade history
+## Coinbase API credentials
 
-Every simulated BUY/SELL is saved in SQLite in the `trades` table.
+Helix stores Coinbase credentials in a local `.env` file.
 
-The GTK4 dashboard shows the most recent trades first.
+Example:
+
+```env
+COINBASE_API_KEY=organizations/.../apiKeys/...
+COINBASE_API_SECRET=-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----\n
+```
+
+Use a Coinbase/CDP key with:
+
+```text
+Algorithm: ECDSA
+Permissions: View only
+```
+
+Do **not** enable trading, transfer, or withdrawal permissions yet.
+
+Never commit `.env`.
 
 ---
 
@@ -184,7 +190,7 @@ The GTK4 dashboard shows the most recent trades first.
 On Debian/Ubuntu/Trisquel-like systems:
 
 ```bash
-sudo apt install build-essential libgtk-4-dev pkg-config libsqlite3-dev libcurl4-openssl-dev libcjson-dev
+sudo apt install build-essential libgtk-4-dev pkg-config libsqlite3-dev libcurl4-openssl-dev libcjson-dev libjwt-dev
 ```
 
 ---
@@ -209,89 +215,47 @@ make clean
 
 ---
 
-## Coinbase read-only mode
+## Git hygiene
 
-Helix currently uses Coinbase only for public BTC-EUR spot price data.
+Do not commit:
 
-No API key is needed for this step.
+- `.env`
+- local SQLite databases
+- Coinbase debug JSON/log files
+- compiled binary
+- local archives
 
-To test:
-
-1. start Helix
-2. set runtime mode to `LIVE_READONLY`
-3. save settings
-4. press `Start bot`
-
-Helix will fetch the BTC-EUR spot price from Coinbase and will not execute trades.
-
----
-
-## Git ignore recommendation
-
-The repository should not include compiled binaries, local databases, archives or secrets.
-
-Recommended `.gitignore`:
-
-```gitignore
-# Binary
-helix
-
-# SQLite local database
-data/*.db
-data/*.db-shm
-data/*.db-wal
-
-# Object/build files
-*.o
-*.out
-
-# Archives
-*.zip
-*.7z
-*.tar.gz
-
-# Environment/secrets
-.env
-*.secret
-config/*.secret
-
-# Editor files
-.vscode/
-.idea/
-
-# System files
-.DS_Store
-```
-
----
-
-## Important Git cleanup
-
-If the binary or database were already committed, remove them from Git tracking while keeping local files:
+Useful cleanup before push:
 
 ```bash
-git rm --cached helix
-git rm --cached data/helix.db
+rm -f data/*.json data/*.log
+rm -f helix
+git status
 ```
 
-Then commit the `.gitignore`.
+If something sensitive was already tracked:
+
+```bash
+git rm --cached .env
+git rm --cached data/coinbase_accounts_raw.json
+git rm --cached data/coinbase_accounts_summary.log
+```
 
 ---
 
 ## Suggested commit message
 
 ```text
-feat: add persistent GTK trading simulator with Coinbase read-only mode
+feat: add Coinbase authenticated read-only wallet sync
 
-- Add GTK4 dashboard with live bot state
-- Add SQLite persistence and recovery
-- Add automatic simulation engine
-- Add configurable strategy settings
-- Add trade history journal
-- Add runtime modes for simulation/read-only/live trading
-- Add Coinbase BTC-EUR read-only market data
-- Add minimum liquidity guard
-- Block LIVE_TRADING until safety checks are implemented
+- Add Coinbase JWT authentication
+- Add read-only wallet balance synchronization
+- Add EUR/BTC remote wallet model
+- Add Coinbase API settings in GTK UI
+- Add expandable settings sections
+- Keep LIVE_TRADING blocked by safety guard
+- Improve decimal parsing for Coinbase balances
+- Update gitignore for local debug files
 ```
 
 ---
@@ -300,16 +264,16 @@ feat: add persistent GTK trading simulator with Coinbase read-only mode
 
 Next steps:
 
-1. improve logging and error reporting
-2. add structured application events table
-3. add Coinbase authenticated read-only wallet sync
-4. add reconciliation between SQLite and Coinbase balances
-5. add fee-aware profit calculation
+1. read Coinbase fills/order history
+2. reconstruct real average buy price
+3. compute real P/L and target sell price
+4. add fee-aware profit calculation
+5. add safety layer module
 6. add order preview mode
 7. add emergency stop
-8. add real trading only after safety checks
-9. split GTK UI into smaller modules
-10. add systemd service mode
+8. add optional paper trading with live data
+9. split GTK UI into smaller files
+10. add systemd/background runtime mode
 
 ---
 

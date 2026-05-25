@@ -3,9 +3,13 @@
 #include "../engine/settings.h"
 #include "../db/database.h"
 #include "../engine/engine.h"
+#include "../exchange/coinbase_client.h"
+#include "../wallet/wallet_info.h"
+#include "../config/env_loader.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define TRADE_HISTORY_LIMIT 8
 
@@ -17,6 +21,8 @@ typedef struct {
     GtkWidget *slots_label;
     GtkWidget *mode_label;
     GtkWidget *runtime_mode_label;
+    GtkWidget *coinbase_credentials_label;
+    GtkWidget *remote_wallet_label;
     GtkWidget *last_trade_label;
     GtkWidget *settings_label;
     GtkWidget *status_label;
@@ -28,7 +34,42 @@ typedef struct {
     GtkWidget *min_liquidity_entry;
     GtkWidget *max_slots_entry;
     GtkWidget *runtime_mode_dropdown;
+
+    GtkWidget *coinbase_api_key_entry;
+    GtkWidget *coinbase_api_secret_entry;
 } AppWidgets;
+
+static void load_app_css(void) {
+    GtkCssProvider *provider = gtk_css_provider_new();
+
+    gtk_css_provider_load_from_string(
+        provider,
+        ".status-running {"
+        "  color: #008000;"
+        "  font-weight: bold;"
+        "}"
+        ".status-stopped {"
+        "  color: #cc0000;"
+        "  font-weight: bold;"
+        "}"
+        ".credentials-ok {"
+        "  color: #008000;"
+        "  font-weight: bold;"
+        "}"
+        ".credentials-missing {"
+        "  color: #cc8800;"
+        "  font-weight: bold;"
+        "}"
+    );
+
+    gtk_style_context_add_provider_for_display(
+        gdk_display_get_default(),
+        GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
+    );
+
+    g_object_unref(provider);
+}
 
 static const char *bot_mode_to_string(BotMode mode) {
     switch (mode) {
@@ -50,10 +91,57 @@ static const char *bot_mode_to_string(BotMode mode) {
 }
 
 static void refresh_status(AppWidgets *widgets) {
-    gtk_label_set_text(
-        GTK_LABEL(widgets->status_label),
-        widgets->state->running ? "Stato: bot avviato" : "Stato: bot fermo"
-    );
+    GtkWidget *label = widgets->status_label;
+
+    gtk_widget_remove_css_class(label, "status-running");
+    gtk_widget_remove_css_class(label, "status-stopped");
+
+    if (widgets->state->running) {
+        gtk_label_set_text(GTK_LABEL(label), "Stato: bot avviato");
+        gtk_widget_add_css_class(label, "status-running");
+    } else {
+        gtk_label_set_text(GTK_LABEL(label), "Stato: bot fermo");
+        gtk_widget_add_css_class(label, "status-stopped");
+    }
+}
+
+static void refresh_coinbase_credentials_status(AppWidgets *widgets) {
+    GtkWidget *label = widgets->coinbase_credentials_label;
+
+    gtk_widget_remove_css_class(label, "credentials-ok");
+    gtk_widget_remove_css_class(label, "credentials-missing");
+
+    if (coinbase_has_credentials()) {
+        gtk_label_set_text(GTK_LABEL(label), "Credenziali Coinbase: presenti");
+        gtk_widget_add_css_class(label, "credentials-ok");
+    } else {
+        gtk_label_set_text(GTK_LABEL(label), "Credenziali Coinbase: mancanti");
+        gtk_widget_add_css_class(label, "credentials-missing");
+    }
+}
+
+static void refresh_remote_wallet_status(AppWidgets *widgets) {
+    WalletInfo info = coinbase_get_wallet_info_readonly();
+
+    char text[256];
+
+    if (info.connected) {
+        snprintf(
+            text,
+            sizeof(text),
+            "Wallet Coinbase read-only: connesso | EUR %.2f | BTC %.8f",
+            info.eur_balance,
+            info.btc_balance
+        );
+    } else {
+        snprintf(
+            text,
+            sizeof(text),
+            "Wallet Coinbase read-only: non connesso"
+        );
+    }
+
+    gtk_label_set_text(GTK_LABEL(widgets->remote_wallet_label), text);
 }
 
 static void clear_trade_list(GtkWidget *trade_list) {
@@ -99,10 +187,6 @@ static void refresh_trade_history(AppWidgets *widgets) {
         gtk_widget_set_margin_start(row_label, 6);
         gtk_widget_set_margin_end(row_label, 6);
 
-        /*
-         * db_get_recent_trades legge ORDER BY id DESC.
-         * append mantiene quindi il più recente in alto.
-         */
         gtk_list_box_append(GTK_LIST_BOX(widgets->trade_list), row_label);
     }
 }
@@ -147,6 +231,8 @@ static void refresh_dashboard(AppWidgets *widgets) {
     gtk_label_set_text(GTK_LABEL(widgets->settings_label), settings_text);
 
     refresh_status(widgets);
+    refresh_coinbase_credentials_status(widgets);
+    refresh_remote_wallet_status(widgets);
     refresh_trade_history(widgets);
 }
 
@@ -190,6 +276,20 @@ static void fill_settings_entries(AppWidgets *widgets) {
     );
 }
 
+static void fill_coinbase_entries(AppWidgets *widgets) {
+    CoinbaseCredentials credentials = env_load_coinbase_credentials();
+
+    gtk_editable_set_text(
+        GTK_EDITABLE(widgets->coinbase_api_key_entry),
+        credentials.api_key
+    );
+
+    gtk_editable_set_text(
+        GTK_EDITABLE(widgets->coinbase_api_secret_entry),
+        credentials.api_secret
+    );
+}
+
 static RuntimeMode get_selected_runtime_mode(GtkWidget *dropdown) {
     guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
 
@@ -202,6 +302,46 @@ static RuntimeMode get_selected_runtime_mode(GtkWidget *dropdown) {
     }
 
     return RUNTIME_MODE_SIMULATION;
+}
+
+static void on_save_coinbase_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+
+    const char *api_key =
+        gtk_editable_get_text(GTK_EDITABLE(widgets->coinbase_api_key_entry));
+
+    const char *api_secret =
+        gtk_editable_get_text(GTK_EDITABLE(widgets->coinbase_api_secret_entry));
+
+    if (
+        api_key == NULL ||
+        api_secret == NULL ||
+        strlen(api_key) == 0 ||
+        strlen(api_secret) == 0
+    ) {
+        gtk_label_set_text(
+            GTK_LABEL(widgets->status_label),
+            "Errore: API Key e API Secret sono obbligatorie"
+        );
+        return;
+    }
+
+    if (!env_save_coinbase_credentials(api_key, api_secret)) {
+        gtk_label_set_text(
+            GTK_LABEL(widgets->status_label),
+            "Errore: impossibile salvare .env"
+        );
+        return;
+    }
+
+    gtk_label_set_text(
+        GTK_LABEL(widgets->status_label),
+        "Credenziali Coinbase salvate in .env"
+    );
+
+    refresh_dashboard(widgets);
 }
 
 static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
@@ -323,15 +463,17 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *slots_label;
     GtkWidget *mode_label;
     GtkWidget *runtime_mode_label;
+    GtkWidget *coinbase_credentials_label;
+    GtkWidget *remote_wallet_label;
     GtkWidget *last_trade_label;
     GtkWidget *settings_label;
     GtkWidget *status_label;
     GtkWidget *buttons_box;
     GtkWidget *start_button;
     GtkWidget *stop_button;
-    GtkWidget *settings_frame;
+
+    GtkWidget *settings_expander;
     GtkWidget *settings_box;
-    GtkWidget *settings_title;
     GtkWidget *slot_amount_entry;
     GtkWidget *buy_drop_entry;
     GtkWidget *sell_profit_entry;
@@ -339,6 +481,13 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *max_slots_entry;
     GtkWidget *runtime_mode_dropdown;
     GtkWidget *save_settings_button;
+
+    GtkWidget *coinbase_expander;
+    GtkWidget *coinbase_box;
+    GtkWidget *coinbase_api_key_entry;
+    GtkWidget *coinbase_api_secret_entry;
+    GtkWidget *save_coinbase_button;
+
     GtkWidget *history_title;
     GtkWidget *trade_list;
     GtkWidget *scrolled_window;
@@ -353,10 +502,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     snprintf(btc_text, sizeof(btc_text), "BTC detenuti: %.8f", state->btc_balance);
     snprintf(slots_text, sizeof(slots_text), "Slot usati: %d / %d", state->used_slots, state->max_slots);
 
+    load_app_css();
+
     window = gtk_application_window_new(app);
 
     gtk_window_set_title(GTK_WINDOW(window), "Helix");
-    gtk_window_set_default_size(GTK_WINDOW(window), 980, 860);
+    gtk_window_set_default_size(GTK_WINDOW(window), 980, 900);
 
     main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_margin_top(main_box, 30);
@@ -376,6 +527,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     slots_label = gtk_label_new(slots_text);
     mode_label = gtk_label_new("");
     runtime_mode_label = gtk_label_new("");
+    coinbase_credentials_label = gtk_label_new("");
+    remote_wallet_label = gtk_label_new("");
     last_trade_label = gtk_label_new("");
     settings_label = gtk_label_new("");
     status_label = gtk_label_new("");
@@ -386,6 +539,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_halign(slots_label, GTK_ALIGN_START);
     gtk_widget_set_halign(mode_label, GTK_ALIGN_START);
     gtk_widget_set_halign(runtime_mode_label, GTK_ALIGN_START);
+    gtk_widget_set_halign(coinbase_credentials_label, GTK_ALIGN_START);
+    gtk_widget_set_halign(remote_wallet_label, GTK_ALIGN_START);
     gtk_widget_set_halign(last_trade_label, GTK_ALIGN_START);
     gtk_widget_set_halign(settings_label, GTK_ALIGN_START);
     gtk_widget_set_halign(status_label, GTK_ALIGN_START);
@@ -398,16 +553,14 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(buttons_box), start_button);
     gtk_box_append(GTK_BOX(buttons_box), stop_button);
 
-    settings_frame = gtk_frame_new(NULL);
+    settings_expander = gtk_expander_new("Impostazioni strategia");
+    gtk_expander_set_expanded(GTK_EXPANDER(settings_expander), TRUE);
+
     settings_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_top(settings_box, 10);
     gtk_widget_set_margin_bottom(settings_box, 10);
     gtk_widget_set_margin_start(settings_box, 10);
     gtk_widget_set_margin_end(settings_box, 10);
-
-    settings_title = gtk_label_new("Impostazioni strategia");
-    gtk_widget_add_css_class(settings_title, "title-3");
-    gtk_widget_set_halign(settings_title, GTK_ALIGN_START);
 
     slot_amount_entry = gtk_entry_new();
     buy_drop_entry = gtk_entry_new();
@@ -426,7 +579,6 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
 
     save_settings_button = gtk_button_new_with_label("Salva impostazioni");
 
-    gtk_box_append(GTK_BOX(settings_box), settings_title);
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Slot EUR", slot_amount_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Buy drop %", buy_drop_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Sell profit %", sell_profit_entry));
@@ -435,7 +587,27 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Modalità operativa", runtime_mode_dropdown));
     gtk_box_append(GTK_BOX(settings_box), save_settings_button);
 
-    gtk_frame_set_child(GTK_FRAME(settings_frame), settings_box);
+    gtk_expander_set_child(GTK_EXPANDER(settings_expander), settings_box);
+
+    coinbase_expander = gtk_expander_new("Coinbase API");
+    gtk_expander_set_expanded(GTK_EXPANDER(coinbase_expander), FALSE);
+
+    coinbase_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(coinbase_box, 10);
+    gtk_widget_set_margin_bottom(coinbase_box, 10);
+    gtk_widget_set_margin_start(coinbase_box, 10);
+    gtk_widget_set_margin_end(coinbase_box, 10);
+
+    coinbase_api_key_entry = gtk_entry_new();
+    coinbase_api_secret_entry = gtk_password_entry_new();
+
+    save_coinbase_button = gtk_button_new_with_label("Salva credenziali Coinbase");
+
+    gtk_box_append(GTK_BOX(coinbase_box), create_setting_row("API Key", coinbase_api_key_entry));
+    gtk_box_append(GTK_BOX(coinbase_box), create_setting_row("API Secret", coinbase_api_secret_entry));
+    gtk_box_append(GTK_BOX(coinbase_box), save_coinbase_button);
+
+    gtk_expander_set_child(GTK_EXPANDER(coinbase_expander), coinbase_box);
 
     history_title = gtk_label_new("Storico operazioni - più recenti in alto");
     gtk_widget_add_css_class(history_title, "title-3");
@@ -455,13 +627,16 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(top_box), slots_label);
     gtk_box_append(GTK_BOX(top_box), mode_label);
     gtk_box_append(GTK_BOX(top_box), runtime_mode_label);
+    gtk_box_append(GTK_BOX(top_box), coinbase_credentials_label);
+    gtk_box_append(GTK_BOX(top_box), remote_wallet_label);
     gtk_box_append(GTK_BOX(top_box), last_trade_label);
     gtk_box_append(GTK_BOX(top_box), settings_label);
     gtk_box_append(GTK_BOX(top_box), status_label);
     gtk_box_append(GTK_BOX(top_box), buttons_box);
 
     gtk_box_append(GTK_BOX(main_box), top_box);
-    gtk_box_append(GTK_BOX(main_box), settings_frame);
+    gtk_box_append(GTK_BOX(main_box), settings_expander);
+    gtk_box_append(GTK_BOX(main_box), coinbase_expander);
     gtk_box_append(GTK_BOX(main_box), history_title);
     gtk_box_append(GTK_BOX(main_box), scrolled_window);
 
@@ -473,6 +648,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->slots_label = slots_label;
     widgets->mode_label = mode_label;
     widgets->runtime_mode_label = runtime_mode_label;
+    widgets->coinbase_credentials_label = coinbase_credentials_label;
+    widgets->remote_wallet_label = remote_wallet_label;
     widgets->last_trade_label = last_trade_label;
     widgets->settings_label = settings_label;
     widgets->status_label = status_label;
@@ -483,13 +660,17 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->min_liquidity_entry = min_liquidity_entry;
     widgets->max_slots_entry = max_slots_entry;
     widgets->runtime_mode_dropdown = runtime_mode_dropdown;
+    widgets->coinbase_api_key_entry = coinbase_api_key_entry;
+    widgets->coinbase_api_secret_entry = coinbase_api_secret_entry;
 
     fill_settings_entries(widgets);
+    fill_coinbase_entries(widgets);
     refresh_dashboard(widgets);
 
     g_signal_connect(start_button, "clicked", G_CALLBACK(on_start_clicked), widgets);
     g_signal_connect(stop_button, "clicked", G_CALLBACK(on_stop_clicked), widgets);
     g_signal_connect(save_settings_button, "clicked", G_CALLBACK(on_save_settings_clicked), widgets);
+    g_signal_connect(save_coinbase_button, "clicked", G_CALLBACK(on_save_coinbase_clicked), widgets);
 
     g_timeout_add_seconds(2, on_engine_timer, widgets);
 

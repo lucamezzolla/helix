@@ -1,22 +1,32 @@
 # Binary
 helix
 
-# SQLite
+# SQLite local database
 data/*.db
 data/*.db-shm
 data/*.db-wal
 
-# Build
+# Local Coinbase/API debug outputs
+data/*.json
+data/*.log
+
+# Object/build files
 *.o
 *.out
 
 # Archives
 *.zip
+*.7z
+*.tar.gz
 
-# IDE
+# Environment/secrets
+.env
+*.secret
+config/*.secret
+
+# Editor files
 .vscode/
 .idea/
 
-# Secrets
-.env
-*.secret
+# System files
+.DS_Store

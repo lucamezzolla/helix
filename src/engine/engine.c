@@ -3,6 +3,8 @@
 #include "settings.h"
 #include "../db/database.h"
 #include "../market/market_data.h"
+#include "../wallet/wallet_info.h"
+#include "../exchange/coinbase_client.h"
 
 #include <stdio.h>
 
@@ -28,6 +30,36 @@ static int price_high_enough_to_sell(BotState *state, StrategySettings *settings
     return state->current_price >= target_price;
 }
 
+static void sync_state_from_remote_wallet(BotState *state, WalletInfo *remote_wallet) {
+    state->eur_balance = remote_wallet->eur_balance;
+    state->btc_balance = remote_wallet->btc_balance;
+
+    if (state->btc_balance > 0.0) {
+        if (state->eur_balance < 1.0) {
+            state->used_slots = state->max_slots;
+        } else if (state->used_slots <= 0) {
+            state->used_slots = 1;
+        }
+
+        state->mode = BOT_MODE_WAITING_SELL;
+
+        snprintf(
+            state->last_trade,
+            sizeof(state->last_trade),
+            "LIVE_READONLY sync: posizione BTC rilevata"
+        );
+    } else {
+        state->used_slots = 0;
+        state->mode = BOT_MODE_READY;
+
+        snprintf(
+            state->last_trade,
+            sizeof(state->last_trade),
+            "LIVE_READONLY sync: nessuna posizione BTC"
+        );
+    }
+}
+
 void helix_engine_tick(BotState *state) {
     StrategySettings settings = settings_load();
 
@@ -37,11 +69,24 @@ void helix_engine_tick(BotState *state) {
     }
 
     state->max_slots = settings.max_slots;
-
     state->current_price = market_data_get_price(state);
 
     if (settings.runtime_mode == RUNTIME_MODE_LIVE_READONLY) {
-        state->mode = BOT_MODE_READY;
+        WalletInfo remote_wallet =
+            coinbase_get_wallet_info_readonly();
+
+        if (remote_wallet.connected) {
+            sync_state_from_remote_wallet(state, &remote_wallet);
+        } else {
+            state->mode = BOT_MODE_ERROR;
+
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "LIVE_READONLY errore: wallet remoto non connesso"
+            );
+        }
+
         return;
     }
 
