@@ -6,6 +6,10 @@
 #include "../market/market_data.h"
 #include "../wallet/wallet_info.h"
 #include "../exchange/coinbase_client.h"
+#include "../exchange/order_preview.h"
+#include "../exchange/order_executor.h"
+#include "exchange_safety.h"
+#include "runtime_safety.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +17,11 @@
 
 #define AUDIT_COOLDOWN_SECONDS 300
 #define AUDIT_CLEANUP_INTERVAL_SECONDS 3600
+#define COINBASE_ORDER_PREVIEW_INTERVAL_SECONDS 300
+
+static double estimate_fee_rate(StrategySettings *settings);
+static double current_cost_basis(BotState *state);
+static void audit_runtime_safety_block(const char *event_type, RuntimeSafetyCheck safety, BotState *state);
 
 static int is_high_priority_audit_event(const char *event_type, const char *decision) {
     if (decision && (
@@ -114,6 +123,155 @@ static void audit_engine_cleanup_if_needed(StrategySettings *settings) {
 
     db_prune_engine_audits(retention_days);
     last_cleanup_time = now;
+}
+
+
+static void audit_runtime_safety_block(
+    const char *event_type,
+    RuntimeSafetyCheck safety,
+    BotState *state
+) {
+    if (state == NULL) {
+        return;
+    }
+
+    snprintf(
+        state->last_trade,
+        sizeof(state->last_trade),
+        "%.120s",
+        safety.reason
+    );
+
+    audit_engine_decision(
+        event_type,
+        safety.decision,
+        safety.reason,
+        state->current_price,
+        state->btc_balance,
+        state->eur_balance,
+        0.0,
+        0.0
+    );
+}
+
+
+static void audit_order_execution_plan(
+    const char *event_type,
+    OrderExecutionPlan plan,
+    BotState *state
+) {
+    if (state == NULL) {
+        return;
+    }
+
+    audit_engine_decision(
+        event_type,
+        plan.allowed ? "DRY_RUN_READY" : "DRY_RUN_BLOCKED",
+        plan.reason,
+        state->current_price,
+        plan.side == ORDER_EXECUTOR_SIDE_SELL ? plan.requested_base_size : plan.preview_base_size,
+        plan.side == ORDER_EXECUTOR_SIDE_BUY ? plan.requested_quote_size : plan.preview_total_eur,
+        plan.preview_fee_eur,
+        0.0
+    );
+}
+
+static void audit_coinbase_order_preview_if_needed(
+    BotState *state,
+    StrategySettings *settings
+) {
+    static time_t last_preview_time = 0;
+    time_t now = time(NULL);
+
+    if (!state || !settings) {
+        return;
+    }
+
+    if (last_preview_time > 0 && difftime(now, last_preview_time) < COINBASE_ORDER_PREVIEW_INTERVAL_SECONDS) {
+        return;
+    }
+
+    if (state->current_price <= 0.0) {
+        return;
+    }
+
+    last_preview_time = now;
+
+    if (state->btc_balance > 0.0) {
+        double cost_basis = current_cost_basis(state);
+        TradePreview local_preview = trade_preview_sell(
+            state->btc_balance,
+            state->current_price,
+            cost_basis,
+            estimate_fee_rate(settings),
+            settings->min_profit_eur,
+            settings->min_profit_percent
+        );
+        CoinbaseOrderPreview preview =
+            coinbase_order_preview_market_sell_btc("BTC-EUR", state->btc_balance);
+        ExchangeSafetyCheck safety = exchange_safety_check_sell(
+            local_preview,
+            preview,
+            state->btc_balance
+        );
+
+        audit_engine_decision(
+            "EXCHANGE_SAFETY_SELL",
+            safety.decision,
+            safety.reason,
+            state->current_price,
+            state->btc_balance,
+            safety.exchange_total_eur,
+            safety.exchange_fee_eur,
+            local_preview.net_profit
+        );
+
+        if (safety.allowed) {
+            OrderExecutionPlan plan = order_executor_plan_market_sell_dry_run(
+                "BTC-EUR",
+                state->btc_balance,
+                preview
+            );
+            audit_order_execution_plan("ORDER_EXECUTOR_SELL", plan, state);
+        }
+
+        return;
+    }
+
+    if (state->eur_balance >= settings->slot_amount_eur && settings->slot_amount_eur > 0.0) {
+        TradePreview local_preview = trade_preview_buy(
+            settings->slot_amount_eur,
+            state->current_price,
+            estimate_fee_rate(settings)
+        );
+        CoinbaseOrderPreview preview =
+            coinbase_order_preview_market_buy_eur("BTC-EUR", settings->slot_amount_eur);
+        ExchangeSafetyCheck safety = exchange_safety_check_buy(
+            local_preview,
+            preview,
+            settings->slot_amount_eur
+        );
+
+        audit_engine_decision(
+            "EXCHANGE_SAFETY_BUY",
+            safety.decision,
+            safety.reason,
+            state->current_price,
+            safety.exchange_btc_amount,
+            settings->slot_amount_eur,
+            safety.exchange_fee_eur,
+            0.0
+        );
+
+        if (safety.allowed) {
+            OrderExecutionPlan plan = order_executor_plan_market_buy_dry_run(
+                "BTC-EUR",
+                settings->slot_amount_eur,
+                preview
+            );
+            audit_order_execution_plan("ORDER_EXECUTOR_BUY", plan, state);
+        }
+    }
 }
 
 static int price_dropped_enough(BotState *state, StrategySettings *settings) {
@@ -263,6 +421,8 @@ void helix_engine_tick(BotState *state) {
                 0.0,
                 0.0
             );
+
+            audit_coinbase_order_preview_if_needed(state, &settings);
         } else {
             state->mode = BOT_MODE_ERROR;
 
@@ -288,24 +448,10 @@ void helix_engine_tick(BotState *state) {
     }
 
     if (settings.runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
+        RuntimeSafetyCheck live_safety = runtime_safety_check_live_trading_arm(&settings);
+
         state->mode = BOT_MODE_ERROR;
-
-        snprintf(
-            state->last_trade,
-            sizeof(state->last_trade),
-            "LIVE_TRADING bloccato: safety checks mancanti"
-        );
-
-        audit_engine_decision(
-            "LIVE_TRADING",
-            "BLOCKED",
-            state->last_trade,
-            state->current_price,
-            state->btc_balance,
-            state->eur_balance,
-            0.0,
-            0.0
-        );
+        audit_runtime_safety_block("LIVE_TRADING", live_safety, state);
 
         return;
     }
@@ -316,9 +462,20 @@ void helix_engine_tick(BotState *state) {
         wallet_can_sell(state) &&
         price_high_enough_to_sell(state, &settings)
     ) {
+        RuntimeSafetyCheck safety = runtime_safety_check_sell(
+            state,
+            &settings,
+            state->btc_balance
+        );
         double btc_before = state->btc_balance;
         double price = state->current_price;
         double cost_basis = current_cost_basis(state);
+
+        if (!safety.allowed) {
+            state->mode = BOT_MODE_WAITING_SELL;
+            audit_runtime_safety_block("RUNTIME_SAFETY_SELL", safety, state);
+            return;
+        }
 
         TradePreview preview = trade_preview_sell(
             btc_before,
@@ -398,7 +555,18 @@ void helix_engine_tick(BotState *state) {
         ) &&
         price_dropped_enough(state, &settings)
     ) {
+        RuntimeSafetyCheck safety = runtime_safety_check_buy(
+            state,
+            &settings,
+            settings.slot_amount_eur
+        );
         double price = state->current_price;
+
+        if (!safety.allowed) {
+            state->mode = BOT_MODE_READY;
+            audit_runtime_safety_block("RUNTIME_SAFETY_BUY", safety, state);
+            return;
+        }
 
         TradePreview preview = trade_preview_buy(
             settings.slot_amount_eur,

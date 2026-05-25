@@ -7,12 +7,16 @@ SRC=src/main.c \
 	src/engine/bot_state.c \
 	src/engine/engine.c \
 	src/engine/trade_preview.c \
+	src/engine/exchange_safety.c \
+	src/engine/runtime_safety.c \
 	src/engine/settings.c \
 	src/engine/wallet.c \
 	src/db/database.c \
 	src/market/market_data.c \
 	src/exchange/coinbase_client.c \
 	src/exchange/coinbase_auth.c \
+	src/exchange/order_preview.c \
+	src/exchange/order_executor.c \
 	src/config/env_loader.c \
 	src/wallet/wallet_info.c
 

@@ -35,6 +35,9 @@ static double parse_decimal_input(const char *value) {
 
 typedef struct {
     BotState *state;
+    GtkWidget *window;
+    guint timer_id;
+    gboolean shutting_down;
     GtkWidget *price_label;
     GtkWidget *eur_label;
     GtkWidget *btc_label;
@@ -113,6 +116,45 @@ static const char *bot_mode_to_string(BotMode mode) {
         default:
             return "UNKNOWN";
     }
+}
+
+static void free_app_widgets(gpointer data) {
+    AppWidgets *widgets = data;
+
+    if (widgets == NULL) {
+        return;
+    }
+
+    widgets->shutting_down = TRUE;
+
+    if (widgets->timer_id != 0) {
+        g_source_remove(widgets->timer_id);
+        widgets->timer_id = 0;
+    }
+
+    if (widgets->state != NULL) {
+        g_free(widgets->state);
+        widgets->state = NULL;
+    }
+
+    g_free(widgets);
+}
+
+static gboolean on_window_close_request(GtkWindow *window, gpointer user_data) {
+    (void)window;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets != NULL) {
+        widgets->shutting_down = TRUE;
+
+        if (widgets->timer_id != 0) {
+            g_source_remove(widgets->timer_id);
+            widgets->timer_id = 0;
+        }
+    }
+
+    return FALSE;
 }
 
 static void refresh_status(AppWidgets *widgets) {
@@ -261,6 +303,10 @@ static void refresh_engine_audit(AppWidgets *widgets) {
 }
 
 static void refresh_dashboard(AppWidgets *widgets) {
+    if (widgets == NULL || widgets->shutting_down) {
+        return;
+    }
+
     StrategySettings settings = settings_load();
 
     char price_text[100];
@@ -533,6 +579,10 @@ static void on_stop_clicked(GtkButton *button, gpointer user_data) {
 static gboolean on_engine_timer(gpointer user_data) {
     AppWidgets *widgets = user_data;
 
+    if (widgets == NULL || widgets->shutting_down || widgets->state == NULL) {
+        return G_SOURCE_REMOVE;
+    }
+
     helix_engine_tick(widgets->state);
     db_save_state(widgets->state);
     refresh_dashboard(widgets);
@@ -771,8 +821,11 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(main_box), audit_title);
     gtk_box_append(GTK_BOX(main_box), audit_scrolled_window);
 
-    AppWidgets *widgets = g_malloc(sizeof(AppWidgets));
+    AppWidgets *widgets = g_malloc0(sizeof(AppWidgets));
     widgets->state = state;
+    widgets->window = window;
+    widgets->timer_id = 0;
+    widgets->shutting_down = FALSE;
     widgets->price_label = price_label;
     widgets->eur_label = eur_label;
     widgets->btc_label = btc_label;
@@ -807,8 +860,16 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     g_signal_connect(stop_button, "clicked", G_CALLBACK(on_stop_clicked), widgets);
     g_signal_connect(save_settings_button, "clicked", G_CALLBACK(on_save_settings_clicked), widgets);
     g_signal_connect(save_coinbase_button, "clicked", G_CALLBACK(on_save_coinbase_clicked), widgets);
+    g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), widgets);
 
-    g_timeout_add_seconds(2, on_engine_timer, widgets);
+    g_object_set_data_full(
+        G_OBJECT(window),
+        "helix-app-widgets",
+        widgets,
+        free_app_widgets
+    );
+
+    widgets->timer_id = g_timeout_add_seconds(2, on_engine_timer, widgets);
 
     gtk_window_set_child(GTK_WINDOW(window), main_box);
     gtk_window_present(GTK_WINDOW(window));

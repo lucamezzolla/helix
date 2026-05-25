@@ -31,19 +31,24 @@ Implemented:
 - internal trade preview engine
 - fee-aware BUY/SELL preview calculations
 - estimated profit and break-even calculations
-- Coinbase fills/order reconstruction (read-only)
+- Coinbase fills reconstruction (read-only)
+- Coinbase order preview integration
+- exchange-side safety gate
+- runtime safety layer
+- dry-run order executor
 - engine audit journal
 - audit throttling and retention cleanup
 - configurable audit retention days
+- GTK lifecycle/timer safety fixes
 
 Not implemented yet:
 
-- real Coinbase BUY/SELL orders
-- Coinbase fills/order history reconstruction
-- real average buy price reconstruction
-- fee/slippage-aware sell target
-- emergency stop layer
-- anti double-order protection
+- real Coinbase BUY/SELL execution
+- reconciliation engine between local DB and Coinbase
+- persistent order state recovery
+- volatility protection layer
+- anti duplicate-order engine
+- emergency stop / kill-switch
 - background daemon/systemd mode
 
 ---
@@ -87,6 +92,12 @@ helix/
 │   │   ├── bot_state.h
 │   │   ├── engine.c
 │   │   ├── engine.h
+│   │   ├── trade_preview.c
+│   │   ├── trade_preview.h
+│   │   ├── exchange_safety.c
+│   │   ├── exchange_safety.h
+│   │   ├── runtime_safety.c
+│   │   ├── runtime_safety.h
 │   │   ├── settings.c
 │   │   ├── settings.h
 │   │   ├── wallet.c
@@ -101,7 +112,11 @@ helix/
 │   │   ├── coinbase_auth.c
 │   │   ├── coinbase_auth.h
 │   │   ├── coinbase_client.c
-│   │   └── coinbase_client.h
+│   │   ├── coinbase_client.h
+│   │   ├── order_preview.c
+│   │   ├── order_preview.h
+│   │   ├── order_executor.c
+│   │   └── order_executor.h
 │   ├── config/
 │   │   ├── env_loader.c
 │   │   └── env_loader.h
@@ -163,8 +178,6 @@ When Helix detects BTC and almost no EUR, it models the state as a fully allocat
 Slot used: max / max
 Mode: WAITING_SELL
 ```
-
-This does not mean Helix knows the historical entry price yet. That will require reading fills/order history in a future step.
 
 ---
 
@@ -235,34 +248,12 @@ Do not commit:
 Useful cleanup before push:
 
 ```bash
-rm -f data/*.json data/*.log
 rm -f helix
+rm -f data/*.json
+rm -f data/*.log
+rm -f data/*.db-shm
+rm -f data/*.db-wal
 git status
-```
-
-If something sensitive was already tracked:
-
-```bash
-git rm --cached .env
-git rm --cached data/coinbase_accounts_raw.json
-git rm --cached data/coinbase_accounts_summary.log
-```
-
----
-
-## Suggested commit message
-
-```text
-feat: add Coinbase authenticated read-only wallet sync
-
-- Add Coinbase JWT authentication
-- Add read-only wallet balance synchronization
-- Add EUR/BTC remote wallet model
-- Add Coinbase API settings in GTK UI
-- Add expandable settings sections
-- Keep LIVE_TRADING blocked by safety guard
-- Improve decimal parsing for Coinbase balances
-- Update gitignore for local debug files
 ```
 
 ---
@@ -271,16 +262,16 @@ feat: add Coinbase authenticated read-only wallet sync
 
 Next steps:
 
-1. read Coinbase fills/order history
-2. reconstruct real average buy price
-3. compute real P/L and target sell price
-4. add fee-aware profit calculation
-5. add safety layer module
-6. add order preview mode
-7. add emergency stop
-8. add optional paper trading with live data
-9. split GTK UI into smaller files
-10. add systemd/background runtime mode
+1. real Coinbase order execution
+2. reconciliation engine
+3. persistent order recovery
+4. volatility protection
+5. emergency stop layer
+6. anti duplicate-order engine
+7. advanced runtime protections
+8. optional paper trading mode
+9. GTK UI modularization
+10. daemon/systemd runtime mode
 
 ---
 
