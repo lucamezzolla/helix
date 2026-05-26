@@ -12,6 +12,26 @@ typedef struct {
     char created_at[32];
 } TradeRecord;
 
+
+
+typedef struct {
+    int id;
+    char client_order_id[96];
+    char side[8];
+    char status[32];
+    char product_id[32];
+    int dry_run;
+    double requested_quote_size;
+    double requested_base_size;
+    double preview_total_eur;
+    double preview_fee_eur;
+    double preview_base_size;
+    double preview_avg_price;
+    char reason[256];
+    char created_at[32];
+    char updated_at[32];
+} OrderStateRecord;
+
 typedef struct {
     int id;
     char event_type[32];
@@ -58,7 +78,29 @@ int db_get_recent_engine_audits(
     int max_records
 );
 
+
+int db_upsert_order_state(
+    const char *client_order_id,
+    const char *side,
+    const char *status,
+    const char *product_id,
+    int dry_run,
+    double requested_quote_size,
+    double requested_base_size,
+    double preview_total_eur,
+    double preview_fee_eur,
+    double preview_base_size,
+    double preview_avg_price,
+    const char *reason
+);
+
+int db_get_active_order_state(OrderStateRecord *record);
+
+int db_mark_dry_run_orders_recovered(void);
+
 int db_prune_engine_audits(int retention_days);
+
+int db_prune_engine_audits_max_records(int max_records);
 
 int db_set_setting(
     const char *key,

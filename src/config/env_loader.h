@@ -14,4 +14,9 @@ int env_save_coinbase_credentials(
     const char *api_secret
 );
 
+int env_load_bool_flag(
+    const char *key,
+    int fallback
+);
+
 #endif

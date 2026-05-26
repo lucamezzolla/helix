@@ -10,6 +10,15 @@
 #include "../exchange/order_executor.h"
 #include "exchange_safety.h"
 #include "runtime_safety.h"
+#include "reconciliation.h"
+#include "volatility_protection.h"
+#include "order_state_recovery.h"
+#include "anti_duplicate_order.h"
+#include "order_journal.h"
+#include "final_live_gate.h"
+#include "operational_limits.h"
+#include "risk_guard.h"
+#include "post_order_reconciliation.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +30,8 @@
 
 static double estimate_fee_rate(StrategySettings *settings);
 static double current_cost_basis(BotState *state);
+static void audit_volatility_protection(VolatilityProtectionCheck check, BotState *state);
+
 static void audit_runtime_safety_block(const char *event_type, RuntimeSafetyCheck safety, BotState *state);
 
 static int is_high_priority_audit_event(const char *event_type, const char *decision) {
@@ -35,7 +46,14 @@ static int is_high_priority_audit_event(const char *event_type, const char *deci
     if (event_type && (
         strcmp(event_type, "LIVE_TRADING") == 0 ||
         strcmp(event_type, "BUY_PREVIEW") == 0 ||
-        strcmp(event_type, "SELL_PREVIEW") == 0
+        strcmp(event_type, "SELL_PREVIEW") == 0 ||
+        strcmp(event_type, "VOLATILITY_PROTECTION") == 0 ||
+        strcmp(event_type, "ORDER_RECOVERY") == 0 ||
+        strcmp(event_type, "ANTI_DUPLICATE_ORDER") == 0 ||
+        strcmp(event_type, "FINAL_LIVE_GATE") == 0 ||
+        strcmp(event_type, "OPERATIONAL_LIMITS") == 0 ||
+        strcmp(event_type, "RISK_GUARD") == 0 ||
+        strcmp(event_type, "POST_ORDER_RECONCILIATION") == 0
     )) {
         return 1;
     }
@@ -126,6 +144,39 @@ static void audit_engine_cleanup_if_needed(StrategySettings *settings) {
 }
 
 
+static void audit_volatility_protection(
+    VolatilityProtectionCheck check,
+    BotState *state
+) {
+    char reason[320];
+
+    if (state == NULL) {
+        return;
+    }
+
+    snprintf(
+        reason,
+        sizeof(reason),
+        "%s | ref %.2f | current %.2f | move %.2f%% | elapsed %d sec",
+        check.reason,
+        check.reference_price,
+        check.current_price,
+        check.move_percent,
+        check.elapsed_seconds
+    );
+
+    audit_engine_decision(
+        "VOLATILITY_PROTECTION",
+        check.decision,
+        reason,
+        state->current_price,
+        state->btc_balance,
+        state->eur_balance,
+        0.0,
+        0.0
+    );
+}
+
 static void audit_runtime_safety_block(
     const char *event_type,
     RuntimeSafetyCheck safety,
@@ -155,13 +206,142 @@ static void audit_runtime_safety_block(
 }
 
 
+
+static void audit_reconciliation_report(
+    ReconciliationReport report,
+    BotState *state
+) {
+    char reason_message[121];
+    char reason[320];
+
+    if (state == NULL) {
+        return;
+    }
+
+    snprintf(reason_message, sizeof(reason_message), "%.120s", report.reason);
+
+    snprintf(
+        reason,
+        sizeof(reason),
+        "%s | EUR delta %.6f | BTC delta %.10f | cost %.2f | avg %.2f",
+        reason_message,
+        report.eur_delta,
+        report.btc_delta,
+        report.reconstructed_cost_basis,
+        report.reconstructed_avg_buy_price
+    );
+
+    audit_engine_decision(
+        "RECONCILIATION",
+        report.decision,
+        reason,
+        state->current_price,
+        state->btc_balance,
+        state->eur_balance,
+        0.0,
+        0.0
+    );
+}
+
 static void audit_order_execution_plan(
     const char *event_type,
     OrderExecutionPlan plan,
-    BotState *state
+    BotState *state,
+    StrategySettings *settings
 ) {
     if (state == NULL) {
         return;
+    }
+
+    if (plan.allowed) {
+        AntiDuplicateOrderCheck duplicate_check =
+            anti_duplicate_order_check_plan(&plan, AUDIT_COOLDOWN_SECONDS);
+
+        if (!duplicate_check.allowed) {
+            audit_engine_decision(
+                "ANTI_DUPLICATE_ORDER",
+                duplicate_check.decision,
+                duplicate_check.reason,
+                state->current_price,
+                plan.side == ORDER_EXECUTOR_SIDE_SELL ? plan.requested_base_size : plan.preview_base_size,
+                plan.side == ORDER_EXECUTOR_SIDE_BUY ? plan.requested_quote_size : plan.preview_total_eur,
+                plan.preview_fee_eur,
+                0.0
+            );
+            return;
+        }
+
+        FinalLiveGateCheck final_gate = final_live_gate_check_dry_run(
+            state,
+            settings,
+            &plan
+        );
+
+        if (!final_gate.allowed) {
+            audit_engine_decision(
+                "FINAL_LIVE_GATE",
+                final_gate.decision,
+                final_gate.reason,
+                state->current_price,
+                plan.side == ORDER_EXECUTOR_SIDE_SELL ? plan.requested_base_size : plan.preview_base_size,
+                plan.side == ORDER_EXECUTOR_SIDE_BUY ? plan.requested_quote_size : plan.preview_total_eur,
+                plan.preview_fee_eur,
+                0.0
+            );
+
+            order_journal_record_execution_plan(
+                &plan,
+                "PRE_EXECUTION",
+                "FINAL_GATE_BLOCKED"
+            );
+            return;
+        }
+
+        anti_duplicate_order_record_dry_run_plan(&plan);
+        order_journal_record_execution_plan(
+            &plan,
+            "PRE_EXECUTION",
+            "FINAL_GATE_OK"
+        );
+
+        PostOrderReconciliationCheck post_order =
+            post_order_reconciliation_check_after_plan(
+                state,
+                settings,
+                &plan
+            );
+
+        audit_engine_decision(
+            "POST_ORDER_RECONCILIATION",
+            post_order.decision,
+            post_order.reason,
+            state->current_price,
+            plan.side == ORDER_EXECUTOR_SIDE_SELL ? plan.requested_base_size : plan.preview_base_size,
+            plan.side == ORDER_EXECUTOR_SIDE_BUY ? plan.requested_quote_size : plan.preview_total_eur,
+            plan.preview_fee_eur,
+            0.0
+        );
+
+        if (!post_order.allowed) {
+            order_journal_record_execution_plan(
+                &plan,
+                "POST_EXECUTION",
+                "POST_ORDER_RECON_BLOCKED"
+            );
+            return;
+        }
+
+        order_journal_record_execution_plan(
+            &plan,
+            "POST_EXECUTION",
+            "POST_ORDER_RECON_OK"
+        );
+    } else {
+        order_journal_record_execution_plan(
+            &plan,
+            "PRE_EXECUTION",
+            "PLAN_BLOCKED"
+        );
     }
 
     audit_engine_decision(
@@ -232,13 +412,24 @@ static void audit_coinbase_order_preview_if_needed(
                 state->btc_balance,
                 preview
             );
-            audit_order_execution_plan("ORDER_EXECUTOR_SELL", plan, state);
+            audit_order_execution_plan("ORDER_EXECUTOR_SELL", plan, state, settings);
         }
 
         return;
     }
 
     if (state->eur_balance >= settings->slot_amount_eur && settings->slot_amount_eur > 0.0) {
+        RuntimeSafetyCheck runtime_safety = runtime_safety_check_buy(
+            state,
+            settings,
+            settings->slot_amount_eur
+        );
+
+        if (!runtime_safety.allowed) {
+            audit_runtime_safety_block("RUNTIME_SAFETY_BUY_PREVIEW", runtime_safety, state);
+            return;
+        }
+
         TradePreview local_preview = trade_preview_buy(
             settings->slot_amount_eur,
             state->current_price,
@@ -269,7 +460,7 @@ static void audit_coinbase_order_preview_if_needed(
                 settings->slot_amount_eur,
                 preview
             );
-            audit_order_execution_plan("ORDER_EXECUTOR_BUY", plan, state);
+            audit_order_execution_plan("ORDER_EXECUTOR_BUY", plan, state, settings);
         }
     }
 }
@@ -389,7 +580,12 @@ static void sync_state_from_remote_wallet(
 }
 
 void helix_engine_tick(BotState *state) {
+    static int order_journal_ready = 0;
     StrategySettings settings = settings_load();
+
+    if (!order_journal_ready) {
+        order_journal_ready = order_journal_init();
+    }
 
     audit_engine_cleanup_if_needed(&settings);
 
@@ -401,6 +597,48 @@ void helix_engine_tick(BotState *state) {
     state->max_slots = settings.max_slots;
     state->current_price = market_data_get_price(state);
 
+    char recovery_reason[256];
+
+    if (order_state_recovery_check(
+            recovery_reason,
+            sizeof(recovery_reason)
+        ) != ORDER_RECOVERY_OK) {
+
+        state->mode = BOT_MODE_ERROR;
+        snprintf(
+            state->last_trade,
+            sizeof(state->last_trade),
+            "%.120s",
+            recovery_reason
+        );
+
+        audit_engine_decision(
+            "ORDER_RECOVERY",
+            "BLOCKED",
+            recovery_reason,
+            state->current_price,
+            state->btc_balance,
+            state->eur_balance,
+            0.0,
+            0.0
+        );
+
+        return;
+    }
+
+    VolatilityProtectionCheck volatility = volatility_protection_check(state, &settings);
+    if (!volatility.allowed) {
+        state->mode = BOT_MODE_ERROR;
+        snprintf(
+            state->last_trade,
+            sizeof(state->last_trade),
+            "%.120s",
+            volatility.reason
+        );
+        audit_volatility_protection(volatility, state);
+        return;
+    }
+
     if (settings.runtime_mode == RUNTIME_MODE_LIVE_READONLY) {
         WalletInfo remote_wallet =
             coinbase_get_wallet_info_readonly();
@@ -409,6 +647,8 @@ void helix_engine_tick(BotState *state) {
             coinbase_get_btc_eur_position_summary_readonly();
 
         if (remote_wallet.connected) {
+            ReconciliationReport reconciliation;
+
             sync_state_from_remote_wallet(state, &remote_wallet, &position_summary);
 
             audit_engine_decision(
@@ -421,6 +661,24 @@ void helix_engine_tick(BotState *state) {
                 0.0,
                 0.0
             );
+
+            reconciliation = reconciliation_check_live_readonly(
+                state,
+                &remote_wallet,
+                &position_summary
+            );
+            audit_reconciliation_report(reconciliation, state);
+
+            if (reconciliation.status == RECONCILIATION_STATUS_BLOCKED) {
+                state->mode = BOT_MODE_ERROR;
+                snprintf(
+                    state->last_trade,
+                    sizeof(state->last_trade),
+                    "%.120s",
+                    reconciliation.reason
+                );
+                return;
+            }
 
             audit_coinbase_order_preview_if_needed(state, &settings);
         } else {
@@ -456,6 +714,24 @@ void helix_engine_tick(BotState *state) {
         return;
     }
 
+    RiskGuardCheck risk_guard = risk_guard_check(state, &settings);
+    if (!risk_guard.allowed) {
+        state->mode = BOT_MODE_ERROR;
+        snprintf(
+            state->last_trade,
+            sizeof(state->last_trade),
+            "Risk guard: %.100s",
+            risk_guard.reason
+        );
+        risk_guard_audit_if_blocked(
+            risk_guard,
+            state->current_price,
+            state->btc_balance,
+            state->eur_balance
+        );
+        return;
+    }
+
     state->mode = BOT_MODE_READY;
 
     if (
@@ -474,6 +750,28 @@ void helix_engine_tick(BotState *state) {
         if (!safety.allowed) {
             state->mode = BOT_MODE_WAITING_SELL;
             audit_runtime_safety_block("RUNTIME_SAFETY_SELL", safety, state);
+            return;
+        }
+
+        OperationalLimitCheck limits = operational_limits_check(
+            &settings,
+            ORDER_EXECUTOR_SIDE_SELL
+        );
+
+        if (!limits.allowed) {
+            state->mode = BOT_MODE_WAITING_SELL;
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "SELL bloccata: %.90s",
+                limits.reason
+            );
+            operational_limits_audit_if_blocked(
+                limits,
+                state->current_price,
+                state->btc_balance,
+                state->eur_balance
+            );
             return;
         }
 
@@ -547,14 +845,7 @@ void helix_engine_tick(BotState *state) {
         return;
     }
 
-    if (
-        wallet_can_buy(
-            state,
-            settings.slot_amount_eur,
-            settings.min_liquidity_percent
-        ) &&
-        price_dropped_enough(state, &settings)
-    ) {
+    if (price_dropped_enough(state, &settings)) {
         RuntimeSafetyCheck safety = runtime_safety_check_buy(
             state,
             &settings,
@@ -565,6 +856,28 @@ void helix_engine_tick(BotState *state) {
         if (!safety.allowed) {
             state->mode = BOT_MODE_READY;
             audit_runtime_safety_block("RUNTIME_SAFETY_BUY", safety, state);
+            return;
+        }
+
+        OperationalLimitCheck limits = operational_limits_check(
+            &settings,
+            ORDER_EXECUTOR_SIDE_BUY
+        );
+
+        if (!limits.allowed) {
+            state->mode = BOT_MODE_READY;
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "BUY bloccato: %.90s",
+                limits.reason
+            );
+            operational_limits_audit_if_blocked(
+                limits,
+                state->current_price,
+                state->btc_balance,
+                state->eur_balance
+            );
             return;
         }
 

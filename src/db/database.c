@@ -5,6 +5,7 @@
 #include <string.h>
 
 #define DB_PATH "data/helix.db"
+#define ENGINE_AUDIT_MAX_RECORDS 5000
 
 int db_init(void) {
     sqlite3 *db;
@@ -73,6 +74,32 @@ int db_init(void) {
 
     if (sqlite3_exec(db, settings_sql, NULL, NULL, &err) != SQLITE_OK) {
         fprintf(stderr, "Errore SQL settings: %s\n", err);
+        sqlite3_free(err);
+        sqlite3_close(db);
+        return 0;
+    }
+
+    const char *order_state_sql =
+        "CREATE TABLE IF NOT EXISTS order_state ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "client_order_id TEXT NOT NULL UNIQUE,"
+        "side TEXT NOT NULL,"
+        "status TEXT NOT NULL,"
+        "product_id TEXT NOT NULL,"
+        "dry_run INTEGER NOT NULL DEFAULT 1,"
+        "requested_quote_size REAL DEFAULT 0,"
+        "requested_base_size REAL DEFAULT 0,"
+        "preview_total_eur REAL DEFAULT 0,"
+        "preview_fee_eur REAL DEFAULT 0,"
+        "preview_base_size REAL DEFAULT 0,"
+        "preview_avg_price REAL DEFAULT 0,"
+        "reason TEXT DEFAULT '',"
+        "created_at TEXT DEFAULT CURRENT_TIMESTAMP,"
+        "updated_at TEXT DEFAULT CURRENT_TIMESTAMP"
+        ");";
+
+    if (sqlite3_exec(db, order_state_sql, NULL, NULL, &err) != SQLITE_OK) {
+        fprintf(stderr, "Errore SQL order_state: %s\n", err);
         sqlite3_free(err);
         sqlite3_close(db);
         return 0;
@@ -430,6 +457,10 @@ int db_log_engine_audit(
     sqlite3_finalize(stmt);
     sqlite3_close(db);
 
+    if (ok) {
+        db_prune_engine_audits_max_records(ENGINE_AUDIT_MAX_RECORDS);
+    }
+
     return ok;
 }
 
@@ -520,6 +551,199 @@ int db_prune_engine_audits(int retention_days) {
     int ok = sqlite3_step(stmt) == SQLITE_DONE;
 
     sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+
+
+int db_prune_engine_audits_max_records(int max_records) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (max_records <= 0) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "DELETE FROM engine_audit "
+        "WHERE id IN ("
+        "    SELECT id FROM engine_audit "
+        "    ORDER BY id DESC "
+        "    LIMIT -1 OFFSET ?"
+        ");";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_int(stmt, 1, max_records);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+
+int db_upsert_order_state(
+    const char *client_order_id,
+    const char *side,
+    const char *status,
+    const char *product_id,
+    int dry_run,
+    double requested_quote_size,
+    double requested_base_size,
+    double preview_total_eur,
+    double preview_fee_eur,
+    double preview_base_size,
+    double preview_avg_price,
+    const char *reason
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (client_order_id == NULL || client_order_id[0] == '\0') {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "INSERT INTO order_state "
+        "(client_order_id, side, status, product_id, dry_run, "
+        "requested_quote_size, requested_base_size, preview_total_eur, "
+        "preview_fee_eur, preview_base_size, preview_avg_price, reason) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(client_order_id) DO UPDATE SET "
+        "status=excluded.status,"
+        "preview_total_eur=excluded.preview_total_eur,"
+        "preview_fee_eur=excluded.preview_fee_eur,"
+        "preview_base_size=excluded.preview_base_size,"
+        "preview_avg_price=excluded.preview_avg_price,"
+        "reason=excluded.reason,"
+        "updated_at=CURRENT_TIMESTAMP;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, client_order_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, side ? side : "UNKNOWN", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, status ? status : "UNKNOWN", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, product_id ? product_id : "BTC-EUR", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 5, dry_run ? 1 : 0);
+    sqlite3_bind_double(stmt, 6, requested_quote_size);
+    sqlite3_bind_double(stmt, 7, requested_base_size);
+    sqlite3_bind_double(stmt, 8, preview_total_eur);
+    sqlite3_bind_double(stmt, 9, preview_fee_eur);
+    sqlite3_bind_double(stmt, 10, preview_base_size);
+    sqlite3_bind_double(stmt, 11, preview_avg_price);
+    sqlite3_bind_text(stmt, 12, reason ? reason : "", -1, SQLITE_TRANSIENT);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+int db_get_active_order_state(OrderStateRecord *record) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (record == NULL) {
+        return 0;
+    }
+
+    memset(record, 0, sizeof(*record));
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT id, client_order_id, side, status, product_id, dry_run, "
+        "requested_quote_size, requested_base_size, preview_total_eur, "
+        "preview_fee_eur, preview_base_size, preview_avg_price, reason, "
+        "created_at, updated_at "
+        "FROM order_state "
+        "WHERE status IN ('PLANNED', 'SUBMITTED', 'PENDING', 'PARTIAL_FILL') "
+        "ORDER BY id DESC LIMIT 1;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    int found = 0;
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *client_order_id = sqlite3_column_text(stmt, 1);
+        const unsigned char *side = sqlite3_column_text(stmt, 2);
+        const unsigned char *status = sqlite3_column_text(stmt, 3);
+        const unsigned char *product_id = sqlite3_column_text(stmt, 4);
+        const unsigned char *reason = sqlite3_column_text(stmt, 12);
+        const unsigned char *created_at = sqlite3_column_text(stmt, 13);
+        const unsigned char *updated_at = sqlite3_column_text(stmt, 14);
+
+        record->id = sqlite3_column_int(stmt, 0);
+        snprintf(record->client_order_id, sizeof(record->client_order_id), "%s", client_order_id ? (const char *)client_order_id : "");
+        snprintf(record->side, sizeof(record->side), "%s", side ? (const char *)side : "");
+        snprintf(record->status, sizeof(record->status), "%s", status ? (const char *)status : "");
+        snprintf(record->product_id, sizeof(record->product_id), "%s", product_id ? (const char *)product_id : "");
+        record->dry_run = sqlite3_column_int(stmt, 5);
+        record->requested_quote_size = sqlite3_column_double(stmt, 6);
+        record->requested_base_size = sqlite3_column_double(stmt, 7);
+        record->preview_total_eur = sqlite3_column_double(stmt, 8);
+        record->preview_fee_eur = sqlite3_column_double(stmt, 9);
+        record->preview_base_size = sqlite3_column_double(stmt, 10);
+        record->preview_avg_price = sqlite3_column_double(stmt, 11);
+        snprintf(record->reason, sizeof(record->reason), "%s", reason ? (const char *)reason : "");
+        snprintf(record->created_at, sizeof(record->created_at), "%s", created_at ? (const char *)created_at : "");
+        snprintf(record->updated_at, sizeof(record->updated_at), "%s", updated_at ? (const char *)updated_at : "");
+
+        found = 1;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return found;
+}
+
+int db_mark_dry_run_orders_recovered(void) {
+    sqlite3 *db;
+    char *err = NULL;
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "UPDATE order_state "
+        "SET status='DRY_RUN_RECOVERED', updated_at=CURRENT_TIMESTAMP "
+        "WHERE dry_run=1 AND status IN ('PLANNED', 'SUBMITTED', 'PENDING', 'PARTIAL_FILL');";
+
+    int ok = sqlite3_exec(db, sql, NULL, NULL, &err) == SQLITE_OK;
+
+    if (!ok && err) {
+        fprintf(stderr, "Errore SQL db_mark_dry_run_orders_recovered: %s\n", err);
+        sqlite3_free(err);
+    }
+
     sqlite3_close(db);
 
     return ok;

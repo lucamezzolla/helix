@@ -1,4 +1,6 @@
 #include "runtime_safety.h"
+#include "liquidity_reserve.h"
+#include "emergency_stop.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -19,6 +21,62 @@ static int invalid_positive_double(double value) {
     return !isfinite(value) || value <= 0.0;
 }
 
+static double wallet_total_value_eur(const BotState *state) {
+    double btc_value = 0.0;
+
+    if (state == NULL) {
+        return 0.0;
+    }
+
+    if (isfinite(state->current_price) && state->current_price > 0.0) {
+        btc_value = state->btc_balance * state->current_price;
+    }
+
+    if (!isfinite(btc_value) || btc_value < 0.0) {
+        btc_value = 0.0;
+    }
+
+    return state->eur_balance + btc_value;
+}
+
+static RuntimeSafetyCheck check_min_liquidity_after_buy(
+    const BotState *state,
+    const StrategySettings *settings,
+    double eur_amount
+) {
+    double total_value;
+    double eur_after_buy;
+    double min_eur_required;
+
+    if (settings->min_liquidity_percent < 0.0 || settings->min_liquidity_percent >= 100.0) {
+        return make_check(0, "BLOCKED", "Safety BUY: min_liquidity_percent non valida");
+    }
+
+    total_value = wallet_total_value_eur(state);
+    if (!isfinite(total_value) || total_value <= 0.0) {
+        return make_check(0, "BLOCKED", "Safety BUY: valore wallet non valido per liquidità minima");
+    }
+
+    eur_after_buy = state->eur_balance - eur_amount;
+    min_eur_required = total_value * (settings->min_liquidity_percent / 100.0);
+
+    if (eur_after_buy < min_eur_required) {
+        char reason[160];
+
+        snprintf(
+            reason,
+            sizeof(reason),
+            "Safety BUY: liquidità minima non rispettata | dopo BUY %.2f EUR | richiesta %.2f EUR",
+            eur_after_buy,
+            min_eur_required
+        );
+
+        return make_check(0, "BLOCKED", reason);
+    }
+
+    return make_check(1, "ALLOWED", "Safety BUY: liquidità minima rispettata");
+}
+
 static RuntimeSafetyCheck check_common_state(
     const BotState *state,
     const StrategySettings *settings
@@ -29,6 +87,10 @@ static RuntimeSafetyCheck check_common_state(
 
     if (!state->running) {
         return make_check(0, "BLOCKED", "Safety runtime: bot non avviato");
+    }
+
+    if (emergency_stop_is_active(settings)) {
+        return make_check(0, "BLOCKED", "Safety runtime: emergency stop attivo");
     }
 
     if (invalid_positive_double(state->current_price)) {
@@ -73,11 +135,31 @@ RuntimeSafetyCheck runtime_safety_check_buy(
         return make_check(0, "BLOCKED", "Safety BUY: max_slots raggiunto");
     }
 
-    if (settings->min_liquidity_percent < 0.0 || settings->min_liquidity_percent >= 100.0) {
-        return make_check(0, "BLOCKED", "Safety BUY: min_liquidity_percent non valida");
+    RuntimeSafetyCheck min_liquidity = check_min_liquidity_after_buy(
+        state,
+        settings,
+        eur_amount
+    );
+
+    if (!min_liquidity.allowed) {
+        return min_liquidity;
     }
 
-    return make_check(1, "ALLOWED", "Safety BUY: autorizzato per preview/simulazione");
+    if (settings->liquidity_reserve_percent < 0.0 || settings->liquidity_reserve_percent > 95.0) {
+        return make_check(0, "BLOCKED", "Safety BUY: liquidity_reserve_percent non valida");
+    }
+
+    LiquidityReserveCheck reserve = liquidity_reserve_check_buy(
+        state,
+        settings,
+        eur_amount
+    );
+
+    if (!reserve.can_buy) {
+        return make_check(0, "BLOCKED", reserve.reason);
+    }
+
+    return make_check(1, "ALLOWED", reserve.reason);
 }
 
 RuntimeSafetyCheck runtime_safety_check_sell(
@@ -113,11 +195,33 @@ RuntimeSafetyCheck runtime_safety_check_sell(
 RuntimeSafetyCheck runtime_safety_check_live_trading_arm(
     const StrategySettings *settings
 ) {
-    (void)settings;
+    if (settings == NULL) {
+        return make_check(
+            0,
+            "BLOCKED",
+            "Safety arm: settings non disponibili"
+        );
+    }
+
+    if (emergency_stop_is_active(settings)) {
+        return make_check(
+            0,
+            "BLOCKED",
+            "Safety arm: emergency stop attivo"
+        );
+    }
+
+    if (!settings->live_trading_armed) {
+        return make_check(
+            0,
+            "BLOCKED",
+            "Safety arm: LIVE_TRADING non armato manualmente dall\'utente"
+        );
+    }
 
     return make_check(
         0,
         "BLOCKED",
-        "Safety arm: esecuzione ordini reali non implementata e non autorizzata"
+        "Safety arm: LIVE_TRADING armato manualmente, ma invio ordini reali ancora non implementato"
     );
 }

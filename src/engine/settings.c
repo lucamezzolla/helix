@@ -38,8 +38,18 @@ static double parse_double_setting(const char *value, double fallback) {
 #define KEY_MIN_PROFIT_EUR "strategy.min_profit_eur"
 #define KEY_MIN_PROFIT_PERCENT "strategy.min_profit_percent"
 #define KEY_MIN_LIQUIDITY_PERCENT "strategy.min_liquidity_percent"
+#define KEY_LIQUIDITY_RESERVE_PERCENT "strategy.liquidity_reserve_percent"
 #define KEY_MAX_SLOTS "strategy.max_slots"
+#define KEY_RESERVE_RELEASED_SLOTS "strategy.reserve_released_slots"
 #define KEY_AUDIT_RETENTION_DAYS "audit.retention_days"
+#define KEY_EMERGENCY_STOP_ENABLED "safety.emergency_stop_enabled"
+#define KEY_LIVE_TRADING_ARMED "safety.live_trading_armed"
+#define KEY_VOLATILITY_WINDOW_SECONDS "safety.volatility_window_seconds"
+#define KEY_VOLATILITY_MAX_MOVE_PERCENT "safety.volatility_max_move_percent"
+#define KEY_MAX_ORDERS_PER_DAY "safety.max_orders_per_day"
+#define KEY_ORDER_COOLDOWN_SECONDS "safety.order_cooldown_seconds"
+#define KEY_MAX_DAILY_LOSS_EUR "safety.max_daily_loss_eur"
+#define KEY_MAX_DRAWDOWN_PERCENT "safety.max_drawdown_percent"
 #define KEY_RUNTIME_MODE "runtime.mode"
 
 static double get_double_setting(const char *key, double fallback) {
@@ -129,8 +139,18 @@ StrategySettings settings_default(void) {
     settings.min_profit_eur = 1.0;
     settings.min_profit_percent = 0.20;
     settings.min_liquidity_percent = 25.0;
+    settings.liquidity_reserve_percent = 40.0;
     settings.max_slots = 6;
+    settings.reserve_released_slots = 0;
     settings.audit_retention_days = 60;
+    settings.emergency_stop_enabled = 0;
+    settings.live_trading_armed = 0;
+    settings.volatility_window_seconds = 60;
+    settings.volatility_max_move_percent = 3.0;
+    settings.max_orders_per_day = 8;
+    settings.order_cooldown_seconds = 300;
+    settings.max_daily_loss_eur = 25.0;
+    settings.max_drawdown_percent = 8.0;
     settings.runtime_mode = RUNTIME_MODE_SIMULATION;
 
     return settings;
@@ -144,8 +164,18 @@ void settings_save(StrategySettings *settings) {
     set_double_setting(KEY_MIN_PROFIT_EUR, settings->min_profit_eur);
     set_double_setting(KEY_MIN_PROFIT_PERCENT, settings->min_profit_percent);
     set_double_setting(KEY_MIN_LIQUIDITY_PERCENT, settings->min_liquidity_percent);
+    set_double_setting(KEY_LIQUIDITY_RESERVE_PERCENT, settings->liquidity_reserve_percent);
     set_int_setting(KEY_MAX_SLOTS, settings->max_slots);
+    set_int_setting(KEY_RESERVE_RELEASED_SLOTS, settings->reserve_released_slots);
     set_int_setting(KEY_AUDIT_RETENTION_DAYS, settings->audit_retention_days);
+    set_int_setting(KEY_EMERGENCY_STOP_ENABLED, settings->emergency_stop_enabled ? 1 : 0);
+    set_int_setting(KEY_LIVE_TRADING_ARMED, settings->live_trading_armed ? 1 : 0);
+    set_int_setting(KEY_VOLATILITY_WINDOW_SECONDS, settings->volatility_window_seconds);
+    set_double_setting(KEY_VOLATILITY_MAX_MOVE_PERCENT, settings->volatility_max_move_percent);
+    set_int_setting(KEY_MAX_ORDERS_PER_DAY, settings->max_orders_per_day);
+    set_int_setting(KEY_ORDER_COOLDOWN_SECONDS, settings->order_cooldown_seconds);
+    set_double_setting(KEY_MAX_DAILY_LOSS_EUR, settings->max_daily_loss_eur);
+    set_double_setting(KEY_MAX_DRAWDOWN_PERCENT, settings->max_drawdown_percent);
     set_runtime_mode_setting(settings->runtime_mode);
 }
 
@@ -181,12 +211,52 @@ void settings_save_defaults_if_missing(void) {
         set_double_setting(KEY_MIN_LIQUIDITY_PERCENT, defaults.min_liquidity_percent);
     }
 
+    if (!db_get_setting(KEY_LIQUIDITY_RESERVE_PERCENT, buffer, sizeof(buffer))) {
+        set_double_setting(KEY_LIQUIDITY_RESERVE_PERCENT, defaults.liquidity_reserve_percent);
+    }
+
     if (!db_get_setting(KEY_MAX_SLOTS, buffer, sizeof(buffer))) {
         set_int_setting(KEY_MAX_SLOTS, defaults.max_slots);
     }
 
+    if (!db_get_setting(KEY_RESERVE_RELEASED_SLOTS, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_RESERVE_RELEASED_SLOTS, defaults.reserve_released_slots);
+    }
+
     if (!db_get_setting(KEY_AUDIT_RETENTION_DAYS, buffer, sizeof(buffer))) {
         set_int_setting(KEY_AUDIT_RETENTION_DAYS, defaults.audit_retention_days);
+    }
+
+    if (!db_get_setting(KEY_EMERGENCY_STOP_ENABLED, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_EMERGENCY_STOP_ENABLED, defaults.emergency_stop_enabled);
+    }
+
+    if (!db_get_setting(KEY_LIVE_TRADING_ARMED, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_LIVE_TRADING_ARMED, defaults.live_trading_armed);
+    }
+
+    if (!db_get_setting(KEY_VOLATILITY_WINDOW_SECONDS, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_VOLATILITY_WINDOW_SECONDS, defaults.volatility_window_seconds);
+    }
+
+    if (!db_get_setting(KEY_VOLATILITY_MAX_MOVE_PERCENT, buffer, sizeof(buffer))) {
+        set_double_setting(KEY_VOLATILITY_MAX_MOVE_PERCENT, defaults.volatility_max_move_percent);
+    }
+
+    if (!db_get_setting(KEY_MAX_ORDERS_PER_DAY, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_MAX_ORDERS_PER_DAY, defaults.max_orders_per_day);
+    }
+
+    if (!db_get_setting(KEY_ORDER_COOLDOWN_SECONDS, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_ORDER_COOLDOWN_SECONDS, defaults.order_cooldown_seconds);
+    }
+
+    if (!db_get_setting(KEY_MAX_DAILY_LOSS_EUR, buffer, sizeof(buffer))) {
+        set_double_setting(KEY_MAX_DAILY_LOSS_EUR, defaults.max_daily_loss_eur);
+    }
+
+    if (!db_get_setting(KEY_MAX_DRAWDOWN_PERCENT, buffer, sizeof(buffer))) {
+        set_double_setting(KEY_MAX_DRAWDOWN_PERCENT, defaults.max_drawdown_percent);
     }
 
     if (!db_get_setting(KEY_RUNTIME_MODE, buffer, sizeof(buffer))) {
@@ -219,14 +289,84 @@ StrategySettings settings_load(void) {
     settings.min_liquidity_percent =
         get_double_setting(KEY_MIN_LIQUIDITY_PERCENT, defaults.min_liquidity_percent);
 
+    settings.liquidity_reserve_percent =
+        get_double_setting(KEY_LIQUIDITY_RESERVE_PERCENT, defaults.liquidity_reserve_percent);
+
     settings.max_slots =
         get_int_setting(KEY_MAX_SLOTS, defaults.max_slots);
+
+    settings.reserve_released_slots =
+        get_int_setting(KEY_RESERVE_RELEASED_SLOTS, defaults.reserve_released_slots);
+
+    if (settings.reserve_released_slots < 0) {
+        settings.reserve_released_slots = 0;
+    }
 
     settings.audit_retention_days =
         get_int_setting(KEY_AUDIT_RETENTION_DAYS, defaults.audit_retention_days);
 
+    if (settings.liquidity_reserve_percent < 0.0) {
+        settings.liquidity_reserve_percent = defaults.liquidity_reserve_percent;
+    }
+
+    if (settings.liquidity_reserve_percent > 95.0) {
+        settings.liquidity_reserve_percent = 95.0;
+    }
+
+    if (settings.reserve_released_slots > settings.max_slots) {
+        settings.reserve_released_slots = settings.max_slots;
+    }
+
     if (settings.audit_retention_days < 1) {
         settings.audit_retention_days = defaults.audit_retention_days;
+    }
+
+    settings.emergency_stop_enabled =
+        get_int_setting(KEY_EMERGENCY_STOP_ENABLED, defaults.emergency_stop_enabled) ? 1 : 0;
+
+    settings.live_trading_armed =
+        get_int_setting(KEY_LIVE_TRADING_ARMED, defaults.live_trading_armed) ? 1 : 0;
+
+    settings.volatility_window_seconds =
+        get_int_setting(KEY_VOLATILITY_WINDOW_SECONDS, defaults.volatility_window_seconds);
+
+    settings.volatility_max_move_percent =
+    get_double_setting(KEY_VOLATILITY_MAX_MOVE_PERCENT, defaults.volatility_max_move_percent);
+
+    if (settings.volatility_window_seconds < 10) {
+        settings.volatility_window_seconds = defaults.volatility_window_seconds;
+    }
+
+    if (settings.volatility_max_move_percent <= 0.0) {
+        settings.volatility_max_move_percent = defaults.volatility_max_move_percent;
+    }
+
+    settings.max_orders_per_day =
+        get_int_setting(KEY_MAX_ORDERS_PER_DAY, defaults.max_orders_per_day);
+
+    settings.order_cooldown_seconds =
+        get_int_setting(KEY_ORDER_COOLDOWN_SECONDS, defaults.order_cooldown_seconds);
+
+    settings.max_daily_loss_eur =
+        get_double_setting(KEY_MAX_DAILY_LOSS_EUR, defaults.max_daily_loss_eur);
+
+    settings.max_drawdown_percent =
+        get_double_setting(KEY_MAX_DRAWDOWN_PERCENT, defaults.max_drawdown_percent);
+
+    if (settings.max_orders_per_day <= 0) {
+        settings.max_orders_per_day = defaults.max_orders_per_day;
+    }
+
+    if (settings.order_cooldown_seconds < 0) {
+        settings.order_cooldown_seconds = defaults.order_cooldown_seconds;
+    }
+
+    if (settings.max_daily_loss_eur < 0.0) {
+        settings.max_daily_loss_eur = defaults.max_daily_loss_eur;
+    }
+
+    if (settings.max_drawdown_percent < 0.0) {
+        settings.max_drawdown_percent = defaults.max_drawdown_percent;
     }
 
     settings.runtime_mode =

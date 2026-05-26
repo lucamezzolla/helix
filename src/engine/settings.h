@@ -15,8 +15,18 @@ typedef struct {
     double min_profit_eur;
     double min_profit_percent;
     double min_liquidity_percent;
+    double liquidity_reserve_percent;
     int max_slots;
+    int reserve_released_slots;
     int audit_retention_days;
+    int emergency_stop_enabled;
+    int live_trading_armed;
+    int volatility_window_seconds;
+    double volatility_max_move_percent;
+    int max_orders_per_day;
+    int order_cooldown_seconds;
+    double max_daily_loss_eur;
+    double max_drawdown_percent;
     RuntimeMode runtime_mode;
 } StrategySettings;
 
