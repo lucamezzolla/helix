@@ -6,6 +6,7 @@
 #include "../engine/emergency_stop.h"
 #include "../engine/live_readiness.h"
 #include "../engine/api_health.h"
+#include "../engine/order_journal.h"
 #include "../exchange/coinbase_client.h"
 #include "../wallet/wallet_info.h"
 #include "../config/env_loader.h"
@@ -13,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define TRADE_HISTORY_LIMIT 8
 #define ENGINE_AUDIT_LIMIT 8
@@ -40,6 +42,8 @@ typedef struct {
     BotState *state;
     GtkWidget *window;
     guint timer_id;
+    guint status_message_timeout_id;
+    gboolean has_temporary_status_message;
     gboolean shutting_down;
     GtkWidget *price_label;
     GtkWidget *eur_label;
@@ -156,6 +160,11 @@ static void free_app_widgets(gpointer data) {
         widgets->timer_id = 0;
     }
 
+    if (widgets->status_message_timeout_id != 0) {
+        g_source_remove(widgets->status_message_timeout_id);
+        widgets->status_message_timeout_id = 0;
+    }
+
     if (widgets->state != NULL) {
         g_free(widgets->state);
         widgets->state = NULL;
@@ -182,6 +191,10 @@ static gboolean on_window_close_request(GtkWindow *window, gpointer user_data) {
 }
 
 static void refresh_status(AppWidgets *widgets) {
+    if (widgets == NULL || widgets->has_temporary_status_message) {
+        return;
+    }
+
     GtkWidget *label = widgets->status_label;
 
     gtk_widget_remove_css_class(label, "status-running");
@@ -194,6 +207,41 @@ static void refresh_status(AppWidgets *widgets) {
         gtk_label_set_text(GTK_LABEL(label), "Stato: bot fermo");
         gtk_widget_add_css_class(label, "status-stopped");
     }
+}
+
+static gboolean clear_temporary_status_message(gpointer user_data) {
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->shutting_down) {
+        return G_SOURCE_REMOVE;
+    }
+
+    widgets->has_temporary_status_message = FALSE;
+    widgets->status_message_timeout_id = 0;
+
+    refresh_status(widgets);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void set_temporary_status_message(AppWidgets *widgets, const char *message) {
+    if (widgets == NULL || widgets->status_label == NULL || message == NULL) {
+        return;
+    }
+
+    gtk_widget_remove_css_class(widgets->status_label, "status-running");
+    gtk_widget_remove_css_class(widgets->status_label, "status-stopped");
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+
+    widgets->has_temporary_status_message = TRUE;
+
+    if (widgets->status_message_timeout_id != 0) {
+        g_source_remove(widgets->status_message_timeout_id);
+        widgets->status_message_timeout_id = 0;
+    }
+
+    widgets->status_message_timeout_id =
+        g_timeout_add_seconds(5, clear_temporary_status_message, widgets);
 }
 
 static void refresh_coinbase_credentials_status(AppWidgets *widgets) {
@@ -446,6 +494,10 @@ static GtkWidget *create_main_menu_bar(void) {
     GMenu *view_menu = g_menu_new();
     g_menu_append(view_menu, "Storico operazioni", "win.show-trade-history");
     g_menu_append(view_menu, "Audit decisioni", "win.show-engine-audit");
+    g_menu_append(view_menu, "Report pre-live", "win.show-prelive-report");
+    g_menu_append(view_menu, "Stato protezioni", "win.show-safety-status");
+    g_menu_append(view_menu, "Esporta report pre-live", "win.export-prelive-report");
+    g_menu_append(view_menu, "Esporta snapshot stato", "win.export-status-snapshot");
     g_menu_append_submenu(menu_bar_model, "Visualizza", G_MENU_MODEL(view_menu));
     g_object_unref(view_menu);
 
@@ -482,16 +534,25 @@ static void show_text_dialog(AppWidgets *widgets, const char *title, const char 
     GtkWidget *box;
     GtkWidget *label;
     GtkWidget *button;
+    GtkWidget *content_widget;
+    GtkWidget *scrolled_window = NULL;
+    size_t message_length;
 
     if (widgets == NULL || widgets->window == NULL) {
         return;
     }
 
+    if (message == NULL) {
+        message = "";
+    }
+
+    message_length = strlen(message);
+
     dialog = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(dialog), title);
     gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(widgets->window));
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 520, 260);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 620, -1);
 
     box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_margin_top(box, 20);
@@ -501,14 +562,29 @@ static void show_text_dialog(AppWidgets *widgets, const char *title, const char 
 
     label = gtk_label_new(message);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_selectable(GTK_LABEL(label), TRUE);
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     gtk_widget_set_valign(label, GTK_ALIGN_START);
-    gtk_widget_set_vexpand(label, TRUE);
+    gtk_widget_set_vexpand(label, FALSE);
+
+    if (message_length > 1200) {
+        scrolled_window = gtk_scrolled_window_new();
+        gtk_scrolled_window_set_policy(
+            GTK_SCROLLED_WINDOW(scrolled_window),
+            GTK_POLICY_AUTOMATIC,
+            GTK_POLICY_AUTOMATIC
+        );
+        gtk_widget_set_size_request(scrolled_window, 620, 420);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), label);
+        content_widget = scrolled_window;
+    } else {
+        content_widget = label;
+    }
 
     button = gtk_button_new_with_label("Chiudi");
     gtk_widget_set_halign(button, GTK_ALIGN_END);
 
-    gtk_box_append(GTK_BOX(box), label);
+    gtk_box_append(GTK_BOX(box), content_widget);
     gtk_box_append(GTK_BOX(box), button);
 
     gtk_window_set_child(GTK_WINDOW(dialog), box);
@@ -1122,6 +1198,452 @@ static void on_menu_show_engine_audit_action(GSimpleAction *action, GVariant *pa
     gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: audit decisioni aperto");
 }
 
+static void build_prelive_report_message(AppWidgets *widgets, char *message, size_t message_size) {
+    if (message == NULL || message_size == 0) {
+        return;
+    }
+
+    message[0] = '\0';
+
+    if (widgets == NULL || widgets->state == NULL) {
+        snprintf(message, message_size, "Report pre-live non disponibile: stato applicazione non valido.");
+        return;
+    }
+
+    StrategySettings settings = settings_load();
+    LiveReadinessReport readiness = live_readiness_check(widgets->state, &settings);
+    ApiHealthReport api_health = api_health_check_light(widgets->state, &settings);
+    PreliveReport prelive_report;
+    EngineAuditSummary audit_summary;
+
+    memset(&prelive_report, 0, sizeof(prelive_report));
+    memset(&audit_summary, 0, sizeof(audit_summary));
+
+    order_journal_get_prelive_report(&prelive_report);
+    db_get_engine_audit_summary_last_days(&audit_summary, 7);
+
+    int dry_run_target = 20;
+    int dry_run_missing = dry_run_target - prelive_report.dry_run_last_7_days;
+    if (dry_run_missing < 0) {
+        dry_run_missing = 0;
+    }
+
+    int safety_blocks_total =
+        audit_summary.reconciliation_blocks +
+        audit_summary.order_recovery_blocks +
+        audit_summary.volatility_blocks +
+        audit_summary.operational_limits_blocks +
+        audit_summary.risk_guard_blocks +
+        audit_summary.final_live_gate_blocks +
+        audit_summary.anti_duplicate_blocks +
+        audit_summary.prelive_validation_blocks +
+        audit_summary.real_executor_blocks +
+        audit_summary.post_order_reconciliation_blocks;
+
+    const char *runtime_label = runtime_mode_to_string(settings.runtime_mode);
+    const char *bot_running_label = widgets->state->running ? "avviato" : "fermo";
+    const char *kill_switch_label = settings.emergency_stop_enabled ? "ATTIVO" : "disattivato";
+    const char *live_arm_label = settings.live_trading_armed ? "ATTIVO" : "disattivato";
+    const char *reserve_label = settings.reserve_released_slots > 0 ? "parzialmente sbloccata" : "protetta";
+
+    const char *prelive_status = "NON PRONTO";
+    if (
+        readiness.blocking_count == 0 &&
+        api_health.blocking_count == 0 &&
+        prelive_report.dry_run_last_7_days >= dry_run_target &&
+        prelive_report.final_gate_ok_last_7_days > 0 &&
+        prelive_report.post_order_recon_blocked_last_7_days == 0 &&
+        prelive_report.real_sent_last_7_days == 0
+    ) {
+        prelive_status = "QUASI PRONTO - serve comunque revisione manuale";
+    }
+
+    snprintf(
+        message,
+        message_size,
+        "=== STATO GENERALE ===\n"
+        "Pre-live: %s\n"
+        "Bot: %s\n"
+        "Runtime: %s\n"
+        "Kill-switch: %s\n"
+        "LIVE_TRADING arm: %s\n"
+        "Riserva liquidità: %.2f%% (%s, slot sbloccati %d/%d)\n\n"
+
+        "=== READINESS ===\n"
+        "Stato: %s\n"
+        "Blocchi: %d\n"
+        "Warning: %d\n"
+        "Motivo: %.500s\n\n"
+
+        "=== API HEALTH ===\n"
+        "Stato: %s\n"
+        "Blocchi: %d\n"
+        "Warning: %d\n"
+        "Motivo: %.500s\n\n"
+
+        "=== DRY-RUN E JOURNAL ===\n"
+        "Dry-run ultimi 7 giorni: %d / %d\n"
+        "  BUY dry-run: %d\n"
+        "  SELL dry-run: %d\n"
+        "Dry-run mancanti alla soglia minima: %d\n"
+        "Journal ultime 24h: %d\n"
+        "Ultimo client_order_id: %s\n"
+        "Ultimo evento journal: %s\n"
+        "Ordini reali inviati ultimi 7 giorni: %d\n\n"
+
+        "=== FINAL GATE / EXECUTOR ===\n"
+        "Final gate OK: %d\n"
+        "Final gate bloccati: %d\n"
+        "Executor reale bloccato: %d\n"
+        "Post-order reconciliation OK: %d\n"
+        "Post-order reconciliation bloccata: %d\n\n"
+
+        "=== SAFETY BLOCKS ULTIMI 7 GIORNI ===\n"
+        "Totale audit ultimi 7 giorni: %d\n"
+        "Totale blocchi safety: %d\n"
+        "RECONCILIATION: %d\n"
+        "ORDER_RECOVERY: %d\n"
+        "VOLATILITY_PROTECTION: %d\n"
+        "OPERATIONAL_LIMITS: %d\n"
+        "RISK_GUARD: %d\n"
+        "FINAL_LIVE_GATE: %d\n"
+        "ANTI_DUPLICATE_ORDER: %d\n"
+        "PRELIVE_VALIDATION: %d\n"
+        "REAL_EXECUTOR: %d\n"
+        "POST_ORDER_RECONCILIATION: %d\n"
+        "EMERGENCY_STOP eventi: %d\n"
+        "LIVE_TRADING_ARM eventi: %d\n\n"
+
+        "=== ULTIMO BLOCCO JOURNAL ===\n"
+        "%s%s%s\n\n"
+
+        "=== PROSSIME AZIONI CONSIGLIATE ===\n"
+        "%s\n"
+        "%s\n"
+        "%s\n"
+        "%s\n"
+        "%s\n\n"
+
+        "Nota: questo report è diagnostico. Non abilita ordini reali.",
+        prelive_status,
+        bot_running_label,
+        runtime_label,
+        kill_switch_label,
+        live_arm_label,
+        settings.liquidity_reserve_percent,
+        reserve_label,
+        settings.reserve_released_slots,
+        settings.max_slots,
+
+        readiness.status,
+        readiness.blocking_count,
+        readiness.warning_count,
+        readiness.reason,
+
+        api_health.status,
+        api_health.blocking_count,
+        api_health.warning_count,
+        api_health.reason,
+
+        prelive_report.dry_run_last_7_days,
+        dry_run_target,
+        prelive_report.buy_dry_run_last_7_days,
+        prelive_report.sell_dry_run_last_7_days,
+        dry_run_missing,
+        prelive_report.journal_entries_last_24h,
+        prelive_report.last_client_order_id[0] ? prelive_report.last_client_order_id : "nessuno",
+        prelive_report.last_journal_at[0] ? prelive_report.last_journal_at : "nessuno",
+        prelive_report.real_sent_last_7_days,
+
+        prelive_report.final_gate_ok_last_7_days,
+        prelive_report.final_gate_blocked_last_7_days,
+        prelive_report.real_executor_blocked_last_7_days,
+        prelive_report.post_order_recon_ok_last_7_days,
+        prelive_report.post_order_recon_blocked_last_7_days,
+
+        audit_summary.total_last_days,
+        safety_blocks_total,
+        audit_summary.reconciliation_blocks,
+        audit_summary.order_recovery_blocks,
+        audit_summary.volatility_blocks,
+        audit_summary.operational_limits_blocks,
+        audit_summary.risk_guard_blocks,
+        audit_summary.final_live_gate_blocks,
+        audit_summary.anti_duplicate_blocks,
+        audit_summary.prelive_validation_blocks,
+        audit_summary.real_executor_blocks,
+        audit_summary.post_order_reconciliation_blocks,
+        audit_summary.emergency_stop_events,
+        audit_summary.live_trading_arm_events,
+
+        prelive_report.last_blocked_at[0] ? prelive_report.last_blocked_at : "Nessun blocco registrato",
+        prelive_report.last_block_reason[0] ? " | " : "",
+        prelive_report.last_block_reason,
+
+        dry_run_missing > 0 ?
+            "- Continua a far girare Helix in LIVE_READONLY + dry-run." :
+            "- Soglia dry-run minima raggiunta: revisiona audit e journal prima di qualunque live.",
+        prelive_report.real_sent_last_7_days > 0 ?
+            "- ATTENZIONE: risultano ordini reali nel journal. Verifica subito Coinbase e DB." :
+            "- Nessun ordine reale risulta inviato negli ultimi 7 giorni.",
+        safety_blocks_total > 0 ?
+            "- Analizza le categorie di blocco più frequenti prima di cambiare strategia." :
+            "- Nessun blocco safety frequente negli ultimi 7 giorni.",
+        readiness.blocking_count > 0 ?
+            "- Risolvi i blocchi readiness prima di considerare LIVE_TRADING." :
+            "- Readiness senza blocchi critici.",
+        api_health.blocking_count > 0 ?
+            "- Risolvi i blocchi API health prima di qualunque test live." :
+            "- API health senza blocchi critici."
+    );
+}
+
+static void on_menu_show_prelive_report_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+    char message[8192];
+
+    build_prelive_report_message(widgets, message, sizeof(message));
+
+    show_text_dialog(
+        widgets,
+        "Report pre-live",
+        message
+    );
+
+    if (widgets != NULL && widgets->status_label != NULL) {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: report pre-live aperto");
+    }
+}
+
+static void on_menu_export_prelive_report_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+    char report[8192];
+    char timestamp[64];
+    time_t now;
+    struct tm *local_time;
+    FILE *file;
+
+    build_prelive_report_message(widgets, report, sizeof(report));
+
+    now = time(NULL);
+    local_time = localtime(&now);
+
+    if (local_time != NULL) {
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local_time);
+    } else {
+        snprintf(timestamp, sizeof(timestamp), "timestamp non disponibile");
+    }
+
+    file = fopen("data/prelive_report.txt", "w");
+
+    if (file == NULL) {
+        if (widgets != NULL && widgets->status_label != NULL) {
+            gtk_label_set_text(
+                GTK_LABEL(widgets->status_label),
+                "Errore: impossibile esportare data/prelive_report.txt"
+            );
+        }
+        return;
+    }
+
+    fprintf(file, "Helix - Report pre-live\n");
+    fprintf(file, "Generato: %s\n\n", timestamp);
+    fprintf(file, "%s\n", report);
+    fclose(file);
+
+    set_temporary_status_message(
+        widgets,
+        "Report pre-live esportato in data/prelive_report.txt"
+    );
+}
+
+static void build_safety_status_message(AppWidgets *widgets, char *message, size_t message_size) {
+    if (message == NULL || message_size == 0) {
+        return;
+    }
+
+    message[0] = '\0';
+
+    if (widgets == NULL || widgets->state == NULL) {
+        snprintf(message, message_size, "Stato protezioni non disponibile: stato applicazione non valido.");
+        return;
+    }
+
+    StrategySettings settings = settings_load();
+    LiveReadinessReport readiness = live_readiness_check(widgets->state, &settings);
+    ApiHealthReport api_health = api_health_check_light(widgets->state, &settings);
+    EngineAuditSummary audit_summary;
+
+    memset(&audit_summary, 0, sizeof(audit_summary));
+    db_get_engine_audit_summary_last_days(&audit_summary, 7);
+
+    double operational_liquidity_percent = 100.0 - settings.liquidity_reserve_percent;
+    if (operational_liquidity_percent < 0.0) {
+        operational_liquidity_percent = 0.0;
+    }
+
+    snprintf(
+        message,
+        message_size,
+        "=== STATO PROTEZIONI ===\n"
+        "Bot: %s\n"
+        "Runtime: %s\n"
+        "Prezzo corrente: %.2f EUR\n"
+        "EUR: %.2f\n"
+        "BTC: %.8f\n"
+        "Slot usati: %d / %d\n\n"
+
+        "=== GATE PRINCIPALI ===\n"
+        "Kill-switch: %s\n"
+        "LIVE_TRADING arm: %s\n"
+        "Readiness: %s (%d blocchi, %d warning)\n"
+        "API health: %s (%d blocchi, %d warning)\n"
+        "Executor reale: presente ma bloccato dalla build normale\n\n"
+
+        "=== LIQUIDITÀ E SLOT ===\n"
+        "Slot EUR: %.2f\n"
+        "Riserva protetta: %.2f%%\n"
+        "Liquidità operativa teorica: %.2f%%\n"
+        "Slot riserva sbloccati manualmente: %d / %d\n"
+        "Liquidità minima: %.2f%%\n\n"
+
+        "=== LIMITI OPERATIVI ===\n"
+        "Max ordini/giorno: %d\n"
+        "Cooldown ordini: %d sec\n"
+        "Max perdita giornaliera: %.2f EUR\n"
+        "Max drawdown: %.2f%%\n"
+        "Volatilità: max %.2f%% in %d sec\n\n"
+
+        "=== AUDIT ULTIMI 7 GIORNI ===\n"
+        "Totale audit: %d\n"
+        "RECONCILIATION: %d\n"
+        "ORDER_RECOVERY: %d\n"
+        "VOLATILITY_PROTECTION: %d\n"
+        "OPERATIONAL_LIMITS: %d\n"
+        "RISK_GUARD: %d\n"
+        "FINAL_LIVE_GATE: %d\n"
+        "ANTI_DUPLICATE_ORDER: %d\n"
+        "PRELIVE_VALIDATION: %d\n"
+        "REAL_EXECUTOR: %d\n"
+        "POST_ORDER_RECONCILIATION: %d\n\n"
+
+        "=== NOTE ===\n"
+        "Questo pannello non abilita trading reale. Serve solo a capire quali protezioni sono attive e quali stanno bloccando Helix.",
+        widgets->state->running ? "avviato" : "fermo",
+        runtime_mode_to_string(settings.runtime_mode),
+        widgets->state->current_price,
+        widgets->state->eur_balance,
+        widgets->state->btc_balance,
+        widgets->state->used_slots,
+        widgets->state->max_slots,
+
+        settings.emergency_stop_enabled ? "ATTIVO" : "disattivato",
+        settings.live_trading_armed ? "ATTIVO" : "disattivato",
+        readiness.status,
+        readiness.blocking_count,
+        readiness.warning_count,
+        api_health.status,
+        api_health.blocking_count,
+        api_health.warning_count,
+
+        settings.slot_amount_eur,
+        settings.liquidity_reserve_percent,
+        operational_liquidity_percent,
+        settings.reserve_released_slots,
+        settings.max_slots,
+        settings.min_liquidity_percent,
+
+        settings.max_orders_per_day,
+        settings.order_cooldown_seconds,
+        settings.max_daily_loss_eur,
+        settings.max_drawdown_percent,
+        settings.volatility_max_move_percent,
+        settings.volatility_window_seconds,
+
+        audit_summary.total_last_days,
+        audit_summary.reconciliation_blocks,
+        audit_summary.order_recovery_blocks,
+        audit_summary.volatility_blocks,
+        audit_summary.operational_limits_blocks,
+        audit_summary.risk_guard_blocks,
+        audit_summary.final_live_gate_blocks,
+        audit_summary.anti_duplicate_blocks,
+        audit_summary.prelive_validation_blocks,
+        audit_summary.real_executor_blocks,
+        audit_summary.post_order_reconciliation_blocks
+    );
+}
+
+static void on_menu_show_safety_status_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+    char message[4096];
+
+    build_safety_status_message(widgets, message, sizeof(message));
+
+    show_text_dialog(
+        widgets,
+        "Stato protezioni",
+        message
+    );
+
+    set_temporary_status_message(widgets, "Visualizza: stato protezioni aperto");
+}
+
+static void on_menu_export_status_snapshot_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+    char safety_status[4096];
+    char prelive_report[8192];
+    char timestamp[64];
+    time_t now;
+    struct tm *local_time;
+    FILE *file;
+
+    build_safety_status_message(widgets, safety_status, sizeof(safety_status));
+    build_prelive_report_message(widgets, prelive_report, sizeof(prelive_report));
+
+    now = time(NULL);
+    local_time = localtime(&now);
+
+    if (local_time != NULL) {
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local_time);
+    } else {
+        snprintf(timestamp, sizeof(timestamp), "timestamp non disponibile");
+    }
+
+    file = fopen("data/status_snapshot.txt", "w");
+
+    if (file == NULL) {
+        set_temporary_status_message(
+            widgets,
+            "Errore: impossibile esportare data/status_snapshot.txt"
+        );
+        return;
+    }
+
+    fprintf(file, "Helix - Snapshot stato\n");
+    fprintf(file, "Generato: %s\n\n", timestamp);
+    fprintf(file, "%s\n\n", safety_status);
+    fprintf(file, "%s\n", prelive_report);
+    fclose(file);
+
+    set_temporary_status_message(
+        widgets,
+        "Snapshot stato esportato in data/status_snapshot.txt"
+    );
+}
+
 static void on_menu_show_help_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action;
     (void)parameter;
@@ -1325,7 +1847,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(settings_expander), "Impostazioni strategia");
     gtk_window_set_transient_for(GTK_WINDOW(settings_expander), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(settings_expander), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(settings_expander), 760, 760);
+    gtk_window_set_default_size(GTK_WINDOW(settings_expander), 760, -1);
     g_signal_connect(settings_expander, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     settings_dialog_scrolled_window = gtk_scrolled_window_new();
@@ -1426,7 +1948,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(coinbase_expander), "Coinbase API");
     gtk_window_set_transient_for(GTK_WINDOW(coinbase_expander), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(coinbase_expander), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(coinbase_expander), 760, 260);
+    gtk_window_set_default_size(GTK_WINDOW(coinbase_expander), 760, -1);
     g_signal_connect(coinbase_expander, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     coinbase_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -1450,7 +1972,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(history_window), "Storico operazioni");
     gtk_window_set_transient_for(GTK_WINDOW(history_window), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(history_window), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(history_window), 900, 520);
+    gtk_window_set_default_size(GTK_WINDOW(history_window), 900, -1);
     g_signal_connect(history_window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     history_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -1467,7 +1989,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(trade_list), GTK_SELECTION_NONE);
 
     scrolled_window = gtk_scrolled_window_new();
-    gtk_widget_set_vexpand(scrolled_window, TRUE);
+    gtk_widget_set_vexpand(scrolled_window, FALSE);
+    gtk_widget_set_size_request(scrolled_window, -1, 220);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), trade_list);
 
     gtk_box_append(GTK_BOX(history_box), history_title);
@@ -1478,7 +2001,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(audit_window), "Audit decisioni motore");
     gtk_window_set_transient_for(GTK_WINDOW(audit_window), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(audit_window), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(audit_window), 1000, 560);
+    gtk_window_set_default_size(GTK_WINDOW(audit_window), 1000, -1);
     g_signal_connect(audit_window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     audit_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -1495,7 +2018,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(audit_list), GTK_SELECTION_NONE);
 
     audit_scrolled_window = gtk_scrolled_window_new();
-    gtk_widget_set_vexpand(audit_scrolled_window, TRUE);
+    gtk_widget_set_vexpand(audit_scrolled_window, FALSE);
+    gtk_widget_set_size_request(audit_scrolled_window, -1, 260);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(audit_scrolled_window), audit_list);
 
     gtk_box_append(GTK_BOX(audit_box), audit_title);
@@ -1523,6 +2047,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->state = state;
     widgets->window = window;
     widgets->timer_id = 0;
+    widgets->status_message_timeout_id = 0;
+    widgets->has_temporary_status_message = FALSE;
     widgets->shutting_down = FALSE;
     widgets->price_label = price_label;
     widgets->eur_label = eur_label;
@@ -1599,6 +2125,22 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
         {
             .name = "show-engine-audit",
             .activate = on_menu_show_engine_audit_action
+        },
+        {
+            .name = "show-prelive-report",
+            .activate = on_menu_show_prelive_report_action
+        },
+        {
+            .name = "show-safety-status",
+            .activate = on_menu_show_safety_status_action
+        },
+        {
+            .name = "export-prelive-report",
+            .activate = on_menu_export_prelive_report_action
+        },
+        {
+            .name = "export-status-snapshot",
+            .activate = on_menu_export_status_snapshot_action
         },
         {
             .name = "show-help",

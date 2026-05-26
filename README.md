@@ -2,9 +2,15 @@
 
 **Helix** is a C/GTK4 desktop application for studying and building a cautious BTC-EUR trading engine.
 
-It currently supports simulation, persistent local state, configurable strategy parameters, Coinbase read-only market data, Coinbase authenticated read-only wallet synchronization, Coinbase order preview, dry-run execution, and multiple safety layers.
+Current milestone:
 
-Real trading is still intentionally blocked.
+```text
+v0.2.0-prelive
+```
+
+Helix currently supports simulation, persistent local state, configurable strategy parameters, Coinbase read-only market data, Coinbase authenticated read-only wallet synchronization, Coinbase order preview, dry-run execution, pre-live reporting, and multiple safety layers.
+
+Real trading is still intentionally blocked in the normal build.
 
 ---
 
@@ -13,13 +19,13 @@ Real trading is still intentionally blocked.
 Implemented:
 
 - GTK4 desktop dashboard
-- global vertical scrolling UI
-- expandable UI sections for strategy and Coinbase API settings
+- compact application menubar
+- separate dialogs for settings, Coinbase API, history, audit, reports and status tools
 - SQLite persistence and state recovery
 - automatic engine loop
 - simulated BUY/SELL mode
 - trade history journal
-- configurable strategy settings
+- configurable strategy and safety settings
 - minimum liquidity guard
 - liquidity reserve protection
 - manual reserve slot release/lock
@@ -56,8 +62,12 @@ Implemented:
 - manual LIVE_TRADING arm/disarm flag
 - dry-run order executor
 - real Coinbase create-order transport implemented behind hard safety locks
+- live execution lock
 - post-order result journal support
 - post-order reconciliation placeholder
+- pre-live report dialog
+- pre-live report export
+- status snapshot export
 - engine audit journal
 - audit throttling and retention cleanup
 - engine audit hard cap at 5000 records
@@ -116,8 +126,11 @@ and its audit/journal decisions must be reviewed carefully.
 helix/
 ├── Makefile
 ├── README.md
+├── VERSION
 ├── .gitignore
 ├── .env.example
+├── docs/
+│   └── checklist_prelive.md
 ├── src/
 │   ├── main.c
 │   ├── ui/
@@ -336,6 +349,31 @@ The normal build is intentionally safe and does not enable real Coinbase order e
 
 ---
 
+## Pre-live validation workflow
+
+Use this workflow before considering any real-money test:
+
+1. Start Helix in `SIMULATION`.
+2. Verify that dashboard, menus, reports and exports work.
+3. Switch to `LIVE_READONLY`.
+4. Confirm that Coinbase price and wallet balances are read correctly.
+5. Keep `LIVE_TRADING` disabled.
+6. Let Helix run with dry-run execution.
+7. Open `Visualizza -> Report pre-live`.
+8. Export `data/prelive_report.txt`.
+9. Export `data/status_snapshot.txt`.
+10. Review audit and journal decisions.
+11. Continue until at least 20 valid dry-runs are recorded in the last 7 days.
+12. Only then consider a separate `live-candidate` branch.
+
+Detailed checklist:
+
+```text
+docs/checklist_prelive.md
+```
+
+---
+
 ## Git hygiene
 
 Do not commit:
@@ -344,6 +382,7 @@ Do not commit:
 - local SQLite databases
 - SQLite WAL/SHM files
 - Coinbase debug JSON/log files
+- generated local reports
 - compiled binary
 - local archives
 - files containing personal financial history
@@ -354,6 +393,7 @@ Useful cleanup before push:
 rm -f helix
 rm -f data/*.json
 rm -f data/*.log
+rm -f data/*.txt
 rm -f data/*.db-shm
 rm -f data/*.db-wal
 git status
@@ -387,6 +427,22 @@ Next steps:
 8. add daemon/systemd runtime mode
 9. prepare a separate controlled branch for real-order testing
 10. only then evaluate whether to enable a real trading build
+
+---
+
+## Versioning
+
+Current milestone:
+
+```text
+v0.2.0-prelive
+```
+
+Suggested tag:
+
+```bash
+git tag -a v0.2.0-prelive -m "v0.2.0-prelive"
+```
 
 ---
 

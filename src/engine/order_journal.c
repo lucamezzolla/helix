@@ -189,3 +189,180 @@ int order_journal_record_execution_result(
 
     return ok;
 }
+
+static int count_order_journal_matches(const char *where_clause) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    char sql[512];
+    int count = 0;
+
+    if (where_clause == NULL) {
+        return 0;
+    }
+
+    if (!order_journal_init()) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT COUNT(*) FROM order_journal WHERE created_at >= datetime('now', '-7 days') AND (%s);",
+        where_clause
+    );
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int(stmt, 0);
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return count;
+}
+
+static void load_last_order_journal_block(PreliveReport *report) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (report == NULL) {
+        return;
+    }
+
+    if (!order_journal_init()) {
+        return;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return;
+    }
+
+    const char *sql =
+        "SELECT COALESCE(NULLIF(execution_reason, ''), reason, ''), created_at "
+        "FROM order_journal "
+        "WHERE status LIKE '%BLOCK%' "
+        "   OR decision LIKE '%BLOCK%' "
+        "   OR execution_decision LIKE '%BLOCK%' "
+        "ORDER BY id DESC LIMIT 1;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *reason = sqlite3_column_text(stmt, 0);
+            const unsigned char *created_at = sqlite3_column_text(stmt, 1);
+
+            snprintf(
+                report->last_block_reason,
+                sizeof(report->last_block_reason),
+                "%s",
+                reason ? (const char *)reason : ""
+            );
+
+            snprintf(
+                report->last_blocked_at,
+                sizeof(report->last_blocked_at),
+                "%s",
+                created_at ? (const char *)created_at : ""
+            );
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+static void load_last_order_journal_entry(PreliveReport *report) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (report == NULL) {
+        return;
+    }
+
+    if (!order_journal_init()) {
+        return;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return;
+    }
+
+    const char *sql =
+        "SELECT client_order_id, created_at "
+        "FROM order_journal "
+        "ORDER BY id DESC LIMIT 1;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *client_order_id = sqlite3_column_text(stmt, 0);
+            const unsigned char *created_at = sqlite3_column_text(stmt, 1);
+
+            snprintf(
+                report->last_client_order_id,
+                sizeof(report->last_client_order_id),
+                "%s",
+                client_order_id ? (const char *)client_order_id : ""
+            );
+
+            snprintf(
+                report->last_journal_at,
+                sizeof(report->last_journal_at),
+                "%s",
+                created_at ? (const char *)created_at : ""
+            );
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+
+int order_journal_get_prelive_report(PreliveReport *report) {
+    if (report == NULL) {
+        return 0;
+    }
+
+    memset(report, 0, sizeof(*report));
+
+    report->dry_run_last_7_days =
+        count_order_journal_matches("dry_run = 1");
+
+    report->buy_dry_run_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND side = 'BUY'");
+
+    report->sell_dry_run_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND side = 'SELL'");
+
+    report->journal_entries_last_24h =
+        count_order_journal_matches("created_at >= datetime('now', '-1 day')");
+
+    report->real_sent_last_7_days =
+        count_order_journal_matches("status = 'REAL_SENT'");
+
+    report->final_gate_ok_last_7_days =
+        count_order_journal_matches("decision = 'FINAL_GATE_OK' OR phase = 'FINAL_GATE_OK'");
+
+    report->final_gate_blocked_last_7_days =
+        count_order_journal_matches("decision = 'FINAL_GATE_BLOCKED' OR phase = 'FINAL_GATE_BLOCKED'");
+
+    report->real_executor_blocked_last_7_days =
+        count_order_journal_matches("status = 'REAL_BLOCKED' OR execution_decision = 'BLOCKED'");
+
+    report->post_order_recon_ok_last_7_days =
+        count_order_journal_matches("decision = 'POST_ORDER_RECON_OK' OR phase = 'POST_ORDER_RECON_OK'");
+
+    report->post_order_recon_blocked_last_7_days =
+        count_order_journal_matches("decision = 'POST_ORDER_RECON_BLOCKED' OR phase = 'POST_ORDER_RECON_BLOCKED'");
+
+    load_last_order_journal_block(report);
+    load_last_order_journal_entry(report);
+
+    return 1;
+}
+

@@ -45,6 +45,23 @@ typedef struct {
     char created_at[32];
 } EngineAuditRecord;
 
+
+typedef struct {
+    int total_last_days;
+    int reconciliation_blocks;
+    int order_recovery_blocks;
+    int volatility_blocks;
+    int operational_limits_blocks;
+    int risk_guard_blocks;
+    int final_live_gate_blocks;
+    int anti_duplicate_blocks;
+    int prelive_validation_blocks;
+    int real_executor_blocks;
+    int post_order_reconciliation_blocks;
+    int emergency_stop_events;
+    int live_trading_arm_events;
+} EngineAuditSummary;
+
 int db_init(void);
 
 int db_save_state(const BotState *state);
@@ -76,6 +93,12 @@ int db_log_engine_audit(
 int db_get_recent_engine_audits(
     EngineAuditRecord *records,
     int max_records
+);
+
+
+int db_get_engine_audit_summary_last_days(
+    EngineAuditSummary *summary,
+    int days
 );
 
 

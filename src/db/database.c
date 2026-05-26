@@ -525,6 +525,96 @@ int db_get_recent_engine_audits(
 }
 
 
+static int db_count_engine_audit_matches(const char *where_clause, int days) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    char sql[512];
+    int count = 0;
+
+    if (where_clause == NULL || days <= 0) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT COUNT(*) FROM engine_audit "
+        "WHERE created_at >= datetime('now', '-' || ? || ' days') "
+        "AND (%s);",
+        where_clause
+    );
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, days);
+
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int(stmt, 0);
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return count;
+}
+
+int db_get_engine_audit_summary_last_days(
+    EngineAuditSummary *summary,
+    int days
+) {
+    if (summary == NULL || days <= 0) {
+        return 0;
+    }
+
+    memset(summary, 0, sizeof(*summary));
+
+    summary->total_last_days =
+        db_count_engine_audit_matches("1 = 1", days);
+
+    summary->reconciliation_blocks =
+        db_count_engine_audit_matches("event_type = 'RECONCILIATION' AND decision LIKE '%BLOCK%'", days);
+
+    summary->order_recovery_blocks =
+        db_count_engine_audit_matches("event_type = 'ORDER_RECOVERY' AND decision LIKE '%BLOCK%'", days);
+
+    summary->volatility_blocks =
+        db_count_engine_audit_matches("event_type = 'VOLATILITY_PROTECTION' AND decision LIKE '%BLOCK%'", days);
+
+    summary->operational_limits_blocks =
+        db_count_engine_audit_matches("event_type = 'OPERATIONAL_LIMITS' AND decision LIKE '%BLOCK%'", days);
+
+    summary->risk_guard_blocks =
+        db_count_engine_audit_matches("event_type = 'RISK_GUARD' AND decision LIKE '%BLOCK%'", days);
+
+    summary->final_live_gate_blocks =
+        db_count_engine_audit_matches("event_type = 'FINAL_LIVE_GATE' AND decision LIKE '%BLOCK%'", days);
+
+    summary->anti_duplicate_blocks =
+        db_count_engine_audit_matches("event_type = 'ANTI_DUPLICATE_ORDER' AND decision LIKE '%BLOCK%'", days);
+
+    summary->prelive_validation_blocks =
+        db_count_engine_audit_matches("event_type = 'PRELIVE_VALIDATION' AND decision LIKE '%BLOCK%'", days);
+
+    summary->real_executor_blocks =
+        db_count_engine_audit_matches("event_type = 'REAL_EXECUTOR' AND decision LIKE '%BLOCK%'", days);
+
+    summary->post_order_reconciliation_blocks =
+        db_count_engine_audit_matches("event_type = 'POST_ORDER_RECONCILIATION' AND decision LIKE '%BLOCK%'", days);
+
+    summary->emergency_stop_events =
+        db_count_engine_audit_matches("event_type = 'EMERGENCY_STOP'", days);
+
+    summary->live_trading_arm_events =
+        db_count_engine_audit_matches("event_type = 'LIVE_TRADING_ARM'", days);
+
+    return 1;
+}
+
+
 int db_prune_engine_audits(int retention_days) {
     sqlite3 *db;
     sqlite3_stmt *stmt;

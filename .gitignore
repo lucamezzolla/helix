@@ -1,33 +1,10 @@
-# Binary
+.env
 helix
-
-# SQLite local database
-data/*.db
 data/*.db-shm
 data/*.db-wal
-sql/seed_real_trades.sql
-
-# Local Coinbase/API debug outputs
 data/*.json
 data/*.log
-
-# Object/build files
+data/*.txt
+*.zip
 *.o
 *.out
-
-# Archives
-*.zip
-*.7z
-*.tar.gz
-
-# Environment/secrets
-.env
-*.secret
-config/*.secret
-
-# Editor files
-.vscode/
-.idea/
-
-# System files
-.DS_Store
