@@ -54,6 +54,12 @@ typedef struct {
     GtkWidget *last_trade_label;
     GtkWidget *settings_label;
     GtkWidget *status_label;
+    GtkWidget *settings_expander;
+    GtkWidget *coinbase_expander;
+    GtkWidget *history_title;
+    GtkWidget *history_scrolled_window;
+    GtkWidget *audit_title;
+    GtkWidget *audit_scrolled_window;
     GtkWidget *trade_list;
     GtkWidget *audit_list;
 
@@ -419,6 +425,97 @@ static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
     gtk_box_append(GTK_BOX(row), entry);
 
     return row;
+}
+
+static GtkWidget *create_main_menu_bar(void) {
+    GMenu *menu_bar_model = g_menu_new();
+
+    GMenu *file_menu = g_menu_new();
+    g_menu_append(file_menu, "Start bot", "win.start-bot");
+    g_menu_append(file_menu, "Stop bot", "win.stop-bot");
+    g_menu_append(file_menu, "Esci", "win.quit");
+    g_menu_append_submenu(menu_bar_model, "File", G_MENU_MODEL(file_menu));
+    g_object_unref(file_menu);
+
+    GMenu *preferences_menu = g_menu_new();
+    g_menu_append(preferences_menu, "Impostazioni strategia", "win.show-strategy-settings");
+    g_menu_append(preferences_menu, "Coinbase API", "win.show-coinbase-api");
+    g_menu_append_submenu(menu_bar_model, "Preferenze", G_MENU_MODEL(preferences_menu));
+    g_object_unref(preferences_menu);
+
+    GMenu *view_menu = g_menu_new();
+    g_menu_append(view_menu, "Storico operazioni", "win.show-trade-history");
+    g_menu_append(view_menu, "Audit decisioni", "win.show-engine-audit");
+    g_menu_append_submenu(menu_bar_model, "Visualizza", G_MENU_MODEL(view_menu));
+    g_object_unref(view_menu);
+
+    GMenu *help_menu = g_menu_new();
+    g_menu_append(help_menu, "Guida", "win.show-help");
+    g_menu_append(help_menu, "Informazioni su...", "win.show-about");
+    g_menu_append_submenu(menu_bar_model, "?", G_MENU_MODEL(help_menu));
+    g_object_unref(help_menu);
+
+    GtkWidget *menu_bar = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(menu_bar_model));
+    g_object_unref(menu_bar_model);
+
+    return menu_bar;
+}
+
+static gboolean on_hide_window_close_request(GtkWindow *window, gpointer user_data) {
+    (void)user_data;
+
+    gtk_widget_set_visible(GTK_WIDGET(window), FALSE);
+
+    return TRUE;
+}
+
+static void present_utility_window(GtkWidget *window) {
+    if (window == NULL) {
+        return;
+    }
+
+    gtk_window_present(GTK_WINDOW(window));
+}
+
+static void show_text_dialog(AppWidgets *widgets, const char *title, const char *message) {
+    GtkWidget *dialog;
+    GtkWidget *box;
+    GtkWidget *label;
+    GtkWidget *button;
+
+    if (widgets == NULL || widgets->window == NULL) {
+        return;
+    }
+
+    dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), title);
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(widgets->window));
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 520, 260);
+
+    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top(box, 20);
+    gtk_widget_set_margin_bottom(box, 20);
+    gtk_widget_set_margin_start(box, 20);
+    gtk_widget_set_margin_end(box, 20);
+
+    label = gtk_label_new(message);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_valign(label, GTK_ALIGN_START);
+    gtk_widget_set_vexpand(label, TRUE);
+
+    button = gtk_button_new_with_label("Chiudi");
+    gtk_widget_set_halign(button, GTK_ALIGN_END);
+
+    gtk_box_append(GTK_BOX(box), label);
+    gtk_box_append(GTK_BOX(box), button);
+
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+
+    g_signal_connect_swapped(button, "clicked", G_CALLBACK(gtk_window_close), dialog);
+
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 static void fill_settings_entries(AppWidgets *widgets) {
@@ -940,6 +1037,123 @@ static void on_stop_clicked(GtkButton *button, gpointer user_data) {
     refresh_dashboard(widgets);
 }
 
+static void on_menu_start_bot_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    on_start_clicked(NULL, user_data);
+}
+
+static void on_menu_stop_bot_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    on_stop_clicked(NULL, user_data);
+}
+
+static void on_menu_quit_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets != NULL && widgets->window != NULL) {
+        gtk_window_close(GTK_WINDOW(widgets->window));
+    }
+}
+
+static void on_menu_show_strategy_settings_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->settings_expander == NULL) {
+        return;
+    }
+
+    fill_settings_entries(widgets);
+    present_utility_window(widgets->settings_expander);
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze: impostazioni strategia aperte");
+}
+
+static void on_menu_show_coinbase_api_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->coinbase_expander == NULL) {
+        return;
+    }
+
+    fill_coinbase_entries(widgets);
+    present_utility_window(widgets->coinbase_expander);
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze: Coinbase API aperte");
+}
+
+static void on_menu_show_trade_history_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->history_scrolled_window == NULL) {
+        return;
+    }
+
+    refresh_trade_history(widgets);
+    present_utility_window(widgets->history_scrolled_window);
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: storico operazioni aperto");
+}
+
+static void on_menu_show_engine_audit_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->audit_scrolled_window == NULL) {
+        return;
+    }
+
+    refresh_engine_audit(widgets);
+    present_utility_window(widgets->audit_scrolled_window);
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: audit decisioni aperto");
+}
+
+static void on_menu_show_help_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    show_text_dialog(
+        widgets,
+        "Guida Helix",
+        "File: avvia, ferma o chiude Helix.\n\n"
+        "Preferenze: apre le impostazioni strategia e Coinbase API in finestre dedicate.\n\n"
+        "Visualizza: apre storico operazioni e audit decisioni in finestre dedicate.\n\n"
+        "LIVE_TRADING resta bloccato dai safety gate e dal build normale."
+    );
+}
+
+static void on_menu_show_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    show_text_dialog(
+        widgets,
+        "Informazioni su Helix",
+        "Helix\n\n"
+        "C/GTK4 BTC-EUR trading engine pre-live.\n\n"
+        "Supporta simulazione, LIVE_READONLY, preview Coinbase, safety gate, dry-run executor e journal.\n\n"
+        "L'esecuzione reale degli ordini resta intenzionalmente bloccata."
+    );
+}
+
 static gboolean on_engine_timer(gpointer user_data) {
     AppWidgets *widgets = user_data;
 
@@ -971,10 +1185,11 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     state->max_slots = settings.max_slots;
 
     GtkWidget *window;
+    GtkWidget *root_box;
     GtkWidget *main_box;
+    GtkWidget *menu_bar;
     GtkWidget *page_scrolled_window;
     GtkWidget *top_box;
-    GtkWidget *title;
     GtkWidget *price_label;
     GtkWidget *eur_label;
     GtkWidget *btc_label;
@@ -988,12 +1203,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *last_trade_label;
     GtkWidget *settings_label;
     GtkWidget *status_label;
-    GtkWidget *buttons_box;
-    GtkWidget *start_button;
-    GtkWidget *stop_button;
-
     GtkWidget *settings_expander;
     GtkWidget *settings_box;
+    GtkWidget *settings_dialog_scrolled_window;
     GtkWidget *slot_amount_entry;
     GtkWidget *buy_drop_entry;
     GtkWidget *sell_profit_entry;
@@ -1032,8 +1244,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *save_coinbase_button;
 
     GtkWidget *history_title;
+    GtkWidget *history_window;
+    GtkWidget *history_box;
     GtkWidget *trade_list;
     GtkWidget *audit_title;
+    GtkWidget *audit_window;
+    GtkWidget *audit_box;
     GtkWidget *audit_list;
     GtkWidget *scrolled_window;
     GtkWidget *audit_scrolled_window;
@@ -1055,6 +1271,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(window), "Helix");
     gtk_window_set_default_size(GTK_WINDOW(window), 980, 800);
 
+    menu_bar = create_main_menu_bar();
+
+    root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
     page_scrolled_window = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(
         GTK_SCROLLED_WINDOW(page_scrolled_window),
@@ -1064,16 +1284,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_vexpand(page_scrolled_window, TRUE);
 
     main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_top(main_box, 30);
+    gtk_widget_set_margin_top(main_box, 16);
     gtk_widget_set_margin_bottom(main_box, 30);
     gtk_widget_set_margin_start(main_box, 30);
     gtk_widget_set_margin_end(main_box, 30);
 
     top_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-
-    title = gtk_label_new("Helix");
-    gtk_widget_add_css_class(title, "title-1");
-    gtk_widget_set_halign(title, GTK_ALIGN_START);
 
     price_label = gtk_label_new(price_text);
     eur_label = gtk_label_new(eur_text);
@@ -1105,16 +1321,19 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_halign(settings_label, GTK_ALIGN_START);
     gtk_widget_set_halign(status_label, GTK_ALIGN_START);
 
-    buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    settings_expander = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(settings_expander), "Impostazioni strategia");
+    gtk_window_set_transient_for(GTK_WINDOW(settings_expander), GTK_WINDOW(window));
+    gtk_window_set_modal(GTK_WINDOW(settings_expander), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(settings_expander), 760, 760);
+    g_signal_connect(settings_expander, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
-    start_button = gtk_button_new_with_label("Start bot");
-    stop_button = gtk_button_new_with_label("Stop bot");
-
-    gtk_box_append(GTK_BOX(buttons_box), start_button);
-    gtk_box_append(GTK_BOX(buttons_box), stop_button);
-
-    settings_expander = gtk_expander_new("Impostazioni strategia");
-    gtk_expander_set_expanded(GTK_EXPANDER(settings_expander), FALSE);
+    settings_dialog_scrolled_window = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(
+        GTK_SCROLLED_WINDOW(settings_dialog_scrolled_window),
+        GTK_POLICY_NEVER,
+        GTK_POLICY_AUTOMATIC
+    );
 
     settings_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_top(settings_box, 10);
@@ -1200,10 +1419,15 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Modalità operativa", runtime_mode_dropdown));
     gtk_box_append(GTK_BOX(settings_box), save_settings_button);
 
-    gtk_expander_set_child(GTK_EXPANDER(settings_expander), settings_box);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(settings_dialog_scrolled_window), settings_box);
+    gtk_window_set_child(GTK_WINDOW(settings_expander), settings_dialog_scrolled_window);
 
-    coinbase_expander = gtk_expander_new("Coinbase API");
-    gtk_expander_set_expanded(GTK_EXPANDER(coinbase_expander), FALSE);
+    coinbase_expander = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(coinbase_expander), "Coinbase API");
+    gtk_window_set_transient_for(GTK_WINDOW(coinbase_expander), GTK_WINDOW(window));
+    gtk_window_set_modal(GTK_WINDOW(coinbase_expander), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(coinbase_expander), 760, 260);
+    g_signal_connect(coinbase_expander, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     coinbase_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_top(coinbase_box, 10);
@@ -1220,7 +1444,20 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(coinbase_box), create_setting_row("API Secret", coinbase_api_secret_entry));
     gtk_box_append(GTK_BOX(coinbase_box), save_coinbase_button);
 
-    gtk_expander_set_child(GTK_EXPANDER(coinbase_expander), coinbase_box);
+    gtk_window_set_child(GTK_WINDOW(coinbase_expander), coinbase_box);
+
+    history_window = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(history_window), "Storico operazioni");
+    gtk_window_set_transient_for(GTK_WINDOW(history_window), GTK_WINDOW(window));
+    gtk_window_set_modal(GTK_WINDOW(history_window), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(history_window), 900, 520);
+    g_signal_connect(history_window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
+
+    history_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(history_box, 12);
+    gtk_widget_set_margin_bottom(history_box, 12);
+    gtk_widget_set_margin_start(history_box, 12);
+    gtk_widget_set_margin_end(history_box, 12);
 
     history_title = gtk_label_new("Storico operazioni - più recenti in alto");
     gtk_widget_add_css_class(history_title, "title-3");
@@ -1230,9 +1467,25 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(trade_list), GTK_SELECTION_NONE);
 
     scrolled_window = gtk_scrolled_window_new();
-    gtk_widget_set_size_request(scrolled_window, -1, 180);
-    gtk_widget_set_vexpand(scrolled_window, FALSE);
+    gtk_widget_set_vexpand(scrolled_window, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), trade_list);
+
+    gtk_box_append(GTK_BOX(history_box), history_title);
+    gtk_box_append(GTK_BOX(history_box), scrolled_window);
+    gtk_window_set_child(GTK_WINDOW(history_window), history_box);
+
+    audit_window = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(audit_window), "Audit decisioni motore");
+    gtk_window_set_transient_for(GTK_WINDOW(audit_window), GTK_WINDOW(window));
+    gtk_window_set_modal(GTK_WINDOW(audit_window), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(audit_window), 1000, 560);
+    g_signal_connect(audit_window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
+
+    audit_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(audit_box, 12);
+    gtk_widget_set_margin_bottom(audit_box, 12);
+    gtk_widget_set_margin_start(audit_box, 12);
+    gtk_widget_set_margin_end(audit_box, 12);
 
     audit_title = gtk_label_new("Audit decisioni motore - più recenti in alto");
     gtk_widget_add_css_class(audit_title, "title-3");
@@ -1242,11 +1495,14 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(audit_list), GTK_SELECTION_NONE);
 
     audit_scrolled_window = gtk_scrolled_window_new();
-    gtk_widget_set_size_request(audit_scrolled_window, -1, 180);
-    gtk_widget_set_vexpand(audit_scrolled_window, FALSE);
+    gtk_widget_set_vexpand(audit_scrolled_window, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(audit_scrolled_window), audit_list);
 
-    gtk_box_append(GTK_BOX(top_box), title);
+    gtk_box_append(GTK_BOX(audit_box), audit_title);
+    gtk_box_append(GTK_BOX(audit_box), audit_scrolled_window);
+    gtk_window_set_child(GTK_WINDOW(audit_window), audit_box);
+
+
     gtk_box_append(GTK_BOX(top_box), price_label);
     gtk_box_append(GTK_BOX(top_box), eur_label);
     gtk_box_append(GTK_BOX(top_box), btc_label);
@@ -1260,15 +1516,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(top_box), last_trade_label);
     gtk_box_append(GTK_BOX(top_box), settings_label);
     gtk_box_append(GTK_BOX(top_box), status_label);
-    gtk_box_append(GTK_BOX(top_box), buttons_box);
 
     gtk_box_append(GTK_BOX(main_box), top_box);
-    gtk_box_append(GTK_BOX(main_box), settings_expander);
-    gtk_box_append(GTK_BOX(main_box), coinbase_expander);
-    gtk_box_append(GTK_BOX(main_box), history_title);
-    gtk_box_append(GTK_BOX(main_box), scrolled_window);
-    gtk_box_append(GTK_BOX(main_box), audit_title);
-    gtk_box_append(GTK_BOX(main_box), audit_scrolled_window);
 
     AppWidgets *widgets = g_malloc0(sizeof(AppWidgets));
     widgets->state = state;
@@ -1288,6 +1537,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->last_trade_label = last_trade_label;
     widgets->settings_label = settings_label;
     widgets->status_label = status_label;
+    widgets->settings_expander = settings_expander;
+    widgets->coinbase_expander = coinbase_expander;
+    widgets->history_title = history_title;
+    widgets->history_scrolled_window = history_window;
+    widgets->audit_title = audit_title;
+    widgets->audit_scrolled_window = audit_window;
     widgets->trade_list = trade_list;
     widgets->audit_list = audit_list;
     widgets->slot_amount_entry = slot_amount_entry;
@@ -1316,12 +1571,56 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->coinbase_api_key_entry = coinbase_api_key_entry;
     widgets->coinbase_api_secret_entry = coinbase_api_secret_entry;
 
+    const GActionEntry window_actions[] = {
+        {
+            .name = "start-bot",
+            .activate = on_menu_start_bot_action
+        },
+        {
+            .name = "stop-bot",
+            .activate = on_menu_stop_bot_action
+        },
+        {
+            .name = "quit",
+            .activate = on_menu_quit_action
+        },
+        {
+            .name = "show-strategy-settings",
+            .activate = on_menu_show_strategy_settings_action
+        },
+        {
+            .name = "show-coinbase-api",
+            .activate = on_menu_show_coinbase_api_action
+        },
+        {
+            .name = "show-trade-history",
+            .activate = on_menu_show_trade_history_action
+        },
+        {
+            .name = "show-engine-audit",
+            .activate = on_menu_show_engine_audit_action
+        },
+        {
+            .name = "show-help",
+            .activate = on_menu_show_help_action
+        },
+        {
+            .name = "show-about",
+            .activate = on_menu_show_about_action
+        }
+    };
+
+    g_action_map_add_action_entries(
+        G_ACTION_MAP(window),
+        window_actions,
+        G_N_ELEMENTS(window_actions),
+        widgets
+    );
+
     fill_settings_entries(widgets);
     fill_coinbase_entries(widgets);
     refresh_dashboard(widgets);
 
-    g_signal_connect(start_button, "clicked", G_CALLBACK(on_start_clicked), widgets);
-    g_signal_connect(stop_button, "clicked", G_CALLBACK(on_stop_clicked), widgets);
     g_signal_connect(save_settings_button, "clicked", G_CALLBACK(on_save_settings_clicked), widgets);
     g_signal_connect(activate_emergency_stop_button, "clicked", G_CALLBACK(on_activate_emergency_stop_clicked), widgets);
     g_signal_connect(reset_emergency_stop_button, "clicked", G_CALLBACK(on_reset_emergency_stop_clicked), widgets);
@@ -1342,6 +1641,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->timer_id = g_timeout_add_seconds(2, on_engine_timer, widgets);
 
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(page_scrolled_window), main_box);
-    gtk_window_set_child(GTK_WINDOW(window), page_scrolled_window);
+    gtk_box_append(GTK_BOX(root_box), menu_bar);
+    gtk_box_append(GTK_BOX(root_box), page_scrolled_window);
+    gtk_window_set_child(GTK_WINDOW(window), root_box);
     gtk_window_present(GTK_WINDOW(window));
 }

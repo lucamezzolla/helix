@@ -41,7 +41,7 @@ all:
 	$(CC) $(CFLAGS) $(SRC) -o $(OUT) $(LIBS)
 
 run: all
-	GTK_A11Y=none ./$(OUT)
+	env -u GTK_IM_MODULE GTK_A11Y=none ./$(OUT)
 
 clean:
 	rm -f $(OUT)
