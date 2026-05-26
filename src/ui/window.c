@@ -1305,6 +1305,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->volatility_max_move_percent_entry = volatility_max_move_percent_entry;
     widgets->max_orders_per_day_entry = max_orders_per_day_entry;
     widgets->order_cooldown_seconds_entry = order_cooldown_seconds_entry;
+    widgets->max_daily_loss_eur_entry = max_daily_loss_eur_entry;
+    widgets->max_drawdown_percent_entry = max_drawdown_percent_entry;
     widgets->emergency_stop_label = emergency_stop_label;
     widgets->live_trading_arm_label = live_trading_arm_label;
     widgets->live_trading_arm_buttons_box = live_trading_arm_buttons_box;

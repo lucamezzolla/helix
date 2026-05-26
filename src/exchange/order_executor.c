@@ -185,6 +185,8 @@ static void set_execution_result(
     );
 }
 
+#ifdef HELIX_ENABLE_REAL_COINBASE_ORDERS
+
 static void validate_plan_before_transport(
     OrderExecutionResult *result,
     const OrderExecutionPlan *plan,
@@ -295,6 +297,8 @@ static void validate_plan_before_transport(
         plan
     );
 }
+
+#endif
 
 #ifndef HELIX_ENABLE_REAL_COINBASE_ORDERS
 
