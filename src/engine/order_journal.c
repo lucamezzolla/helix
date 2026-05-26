@@ -323,6 +323,150 @@ static void load_last_order_journal_entry(PreliveReport *report) {
 }
 
 
+
+int order_journal_real_sent_last_24h(void) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int count = 0;
+
+    if (!order_journal_init()) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT COUNT(*) "
+        "FROM order_journal "
+        "WHERE created_at >= datetime('now', '-1 day') "
+        "  AND status = 'REAL_SENT';";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int(stmt, 0);
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return count;
+}
+
+
+int order_journal_get_latest_unreconciled_real_order(
+    RealOrderJournalRecord *record
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (record == NULL) {
+        return 0;
+    }
+
+    memset(record, 0, sizeof(*record));
+
+    if (!order_journal_init()) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT client_order_id, coinbase_order_id, side, product_id, status, created_at "
+        "FROM order_journal oj "
+        "WHERE status = 'REAL_SENT' "
+        "  AND NOT EXISTS ("
+        "      SELECT 1 FROM order_journal r "
+        "      WHERE r.client_order_id = oj.client_order_id "
+        "        AND r.phase = 'POST_ORDER_RECONCILIATION'"
+        "  ) "
+        "ORDER BY id DESC LIMIT 1;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *client_order_id = sqlite3_column_text(stmt, 0);
+            const unsigned char *coinbase_order_id = sqlite3_column_text(stmt, 1);
+            const unsigned char *side = sqlite3_column_text(stmt, 2);
+            const unsigned char *product_id = sqlite3_column_text(stmt, 3);
+            const unsigned char *status = sqlite3_column_text(stmt, 4);
+            const unsigned char *created_at = sqlite3_column_text(stmt, 5);
+
+            record->found = 1;
+
+            snprintf(record->client_order_id, sizeof(record->client_order_id), "%s", client_order_id ? (const char *)client_order_id : "");
+            snprintf(record->coinbase_order_id, sizeof(record->coinbase_order_id), "%s", coinbase_order_id ? (const char *)coinbase_order_id : "");
+            snprintf(record->side, sizeof(record->side), "%s", side ? (const char *)side : "");
+            snprintf(record->product_id, sizeof(record->product_id), "%s", product_id ? (const char *)product_id : "BTC-EUR");
+            snprintf(record->status, sizeof(record->status), "%s", status ? (const char *)status : "");
+            snprintf(record->created_at, sizeof(record->created_at), "%s", created_at ? (const char *)created_at : "");
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return record->found;
+}
+
+int order_journal_record_post_order_reconciliation(
+    const RealOrderJournalRecord *record,
+    int allowed,
+    const char *decision,
+    const char *reason
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (record == NULL || !record->found || record->client_order_id[0] == '\0') {
+        return 0;
+    }
+
+    if (!order_journal_init()) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "INSERT OR IGNORE INTO order_journal "
+        "(client_order_id, side, product_id, dry_run, status, phase, decision, "
+        "reason, coinbase_order_id, execution_decision, execution_reason, executed_at) "
+        "VALUES (?, ?, ?, 0, ?, 'POST_ORDER_RECONCILIATION', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    const char *final_decision = decision ? decision : (allowed ? "POST_ORDER_RECON_OK" : "POST_ORDER_RECON_BLOCKED");
+    const char *final_reason = reason ? reason : "";
+
+    sqlite3_bind_text(stmt, 1, record->client_order_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, record->side[0] ? record->side : "UNKNOWN", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, record->product_id[0] ? record->product_id : "BTC-EUR", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, allowed ? "POST_ORDER_RECON_OK" : "POST_ORDER_RECON_BLOCKED", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 5, final_decision, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 6, final_reason, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 7, record->coinbase_order_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 8, final_decision, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 9, final_reason, -1, SQLITE_TRANSIENT);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+
 int order_journal_get_prelive_report(PreliveReport *report) {
     if (report == NULL) {
         return 0;
@@ -333,11 +477,32 @@ int order_journal_get_prelive_report(PreliveReport *report) {
     report->dry_run_last_7_days =
         count_order_journal_matches("dry_run = 1");
 
+    report->dry_run_ready_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND status = 'DRY_RUN_READY'");
+
+    report->dry_run_blocked_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND status = 'DRY_RUN_BLOCKED'");
+
     report->buy_dry_run_last_7_days =
         count_order_journal_matches("dry_run = 1 AND side = 'BUY'");
 
+    report->buy_dry_run_ready_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND side = 'BUY' AND status = 'DRY_RUN_READY'");
+
+    report->buy_dry_run_blocked_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND side = 'BUY' AND status = 'DRY_RUN_BLOCKED'");
+
     report->sell_dry_run_last_7_days =
         count_order_journal_matches("dry_run = 1 AND side = 'SELL'");
+
+    report->sell_dry_run_ready_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND side = 'SELL' AND status = 'DRY_RUN_READY'");
+
+    report->sell_dry_run_blocked_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND side = 'SELL' AND status = 'DRY_RUN_BLOCKED'");
+
+    report->sell_blocked_not_profitable_last_7_days =
+        count_order_journal_matches("dry_run = 1 AND side = 'SELL' AND status = 'DRY_RUN_BLOCKED' AND (decision = 'SELL_CANDIDATE_BLOCKED' OR reason LIKE '%profit -%')");
 
     report->journal_entries_last_24h =
         count_order_journal_matches("created_at >= datetime('now', '-1 day')");

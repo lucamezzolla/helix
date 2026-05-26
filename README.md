@@ -327,27 +327,91 @@ sudo apt install build-essential libgtk-4-dev pkg-config libsqlite3-dev libcurl4
 
 ---
 
-## Build
+## Build and run
 
-```bash
-make
-```
+Helix has two build modes.
 
-Run:
+### Normal safe build
 
-```bash
-make run
-```
-
-Clean:
+Use this for daily development, simulation, read-only Coinbase checks and dry-run validation.
 
 ```bash
 make clean
+make run
 ```
 
-The normal build is intentionally safe and does not enable real Coinbase order execution.
+This uses:
+
+```text
+Makefile
+```
+
+It creates and runs:
+
+```text
+./helix
+```
+
+The normal build is intentionally safe and does **not** enable real Coinbase order execution.
+
+You can also run the commands separately:
+
+```bash
+make clean
+make
+./helix
+```
 
 ---
+
+### Live-candidate build
+
+Use this only for controlled live-candidate tests.
+
+```bash
+make -f Makefile.live clean
+make -f Makefile.live
+```
+
+This uses:
+
+```text
+Makefile.live
+```
+
+It creates:
+
+```text
+./helix-live
+```
+
+To run it:
+
+```bash
+make -f Makefile.live run
+```
+
+The live-candidate build compiles with:
+
+```text
+-DHELIX_ENABLE_REAL_COINBASE_ORDERS
+```
+
+Even in this build, real order execution remains blocked unless all runtime safety gates, `.env` flags, micro-live settings and manual arm checks pass.
+
+Do **not** use `Makefile.live` for normal development.
+
+---
+
+### Quick reminder
+
+```text
+make run                    -> safe normal build, runs ./helix
+make -f Makefile.live run   -> live-candidate build, runs ./helix-live
+```
+
+---
+
 
 ## Pre-live validation workflow
 

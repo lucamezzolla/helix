@@ -25,6 +25,8 @@
 #include <time.h>
 
 #define AUDIT_COOLDOWN_SECONDS 300
+#define AUDIT_LOW_PRIORITY_COOLDOWN_SECONDS 900
+#define AUDIT_THROTTLE_BUCKETS 64
 #define AUDIT_CLEANUP_INTERVAL_SECONDS 3600
 #define COINBASE_ORDER_PREVIEW_INTERVAL_SECONDS 300
 
@@ -71,12 +73,20 @@ static void audit_engine_decision(
     double estimated_fee,
     double net_profit
 ) {
-    static char last_signature[512] = "";
-    static time_t last_insert_time = 0;
+    typedef struct {
+        char signature[512];
+        time_t last_insert_time;
+    } AuditThrottleEntry;
+
+    static AuditThrottleEntry throttle_entries[AUDIT_THROTTLE_BUCKETS];
+    static int next_throttle_slot = 0;
+
     char signature[512];
     time_t now = time(NULL);
-    int same_signature;
-    int high_priority;
+    int high_priority = is_high_priority_audit_event(event_type, decision);
+    int cooldown = high_priority ? AUDIT_COOLDOWN_SECONDS : AUDIT_LOW_PRIORITY_COOLDOWN_SECONDS;
+    int free_slot = -1;
+    int oldest_slot = 0;
 
     snprintf(
         signature,
@@ -87,27 +97,64 @@ static void audit_engine_decision(
         reason ? reason : ""
     );
 
-    same_signature = strcmp(signature, last_signature) == 0;
-    high_priority = is_high_priority_audit_event(event_type, decision);
-
     /*
-     * Regola anti-spam:
-     * - se la decisione è identica alla precedente, non riscrivere ogni tick;
-     * - per gli eventi importanti permettiamo comunque un nuovo log dopo 5 minuti;
-     * - per stati ripetitivi tipo SYNC/WAITING, logghiamo solo quando cambia il messaggio.
+     * Throttle globale per firma.
+     *
+     * La vecchia logica confrontava solo con l'audit immediatamente precedente:
+     * due eventi ripetitivi alternati, ad esempio LIVE_READONLY/SYNC e
+     * RECONCILIATION/OK, finivano comunque nel DB a ogni tick.
+     *
+     * Qui invece ogni firma event_type|decision|reason ha il proprio cooldown.
+     * Gli eventi non critici vengono loggati al massimo ogni 15 minuti.
+     * Gli eventi critici restano più reattivi, ma sempre protetti da spam.
      */
-    if (same_signature) {
-        if (!high_priority) {
+    for (int i = 0; i < AUDIT_THROTTLE_BUCKETS; i++) {
+        if (throttle_entries[i].signature[0] == '\0') {
+            if (free_slot < 0) {
+                free_slot = i;
+            }
+            continue;
+        }
+
+        if (strcmp(throttle_entries[i].signature, signature) == 0) {
+            if (
+                throttle_entries[i].last_insert_time > 0 &&
+                difftime(now, throttle_entries[i].last_insert_time) < cooldown
+            ) {
+                return;
+            }
+
+            throttle_entries[i].last_insert_time = now;
+            db_log_engine_audit(
+                event_type,
+                decision,
+                reason,
+                price,
+                btc_amount,
+                eur_amount,
+                estimated_fee,
+                net_profit
+            );
             return;
         }
 
-        if (last_insert_time > 0 && difftime(now, last_insert_time) < AUDIT_COOLDOWN_SECONDS) {
-            return;
+        if (
+            throttle_entries[i].last_insert_time <
+            throttle_entries[oldest_slot].last_insert_time
+        ) {
+            oldest_slot = i;
         }
     }
 
-    snprintf(last_signature, sizeof(last_signature), "%s", signature);
-    last_insert_time = now;
+    int slot = free_slot >= 0 ? free_slot : oldest_slot;
+
+    if (free_slot < 0) {
+        slot = next_throttle_slot;
+        next_throttle_slot = (next_throttle_slot + 1) % AUDIT_THROTTLE_BUCKETS;
+    }
+
+    snprintf(throttle_entries[slot].signature, sizeof(throttle_entries[slot].signature), "%s", signature);
+    throttle_entries[slot].last_insert_time = now;
 
     db_log_engine_audit(
         event_type,
@@ -356,6 +403,25 @@ static void audit_order_execution_plan(
     );
 }
 
+
+static void record_blocked_preview_candidate(
+    OrderExecutionPlan plan,
+    const char *decision,
+    const char *reason
+) {
+    plan.allowed = 0;
+
+    if (reason != NULL && reason[0] != '\0') {
+        snprintf(plan.reason, sizeof(plan.reason), "%.255s", reason);
+    }
+
+    order_journal_record_execution_plan(
+        &plan,
+        "PREVIEW",
+        decision ? decision : "CANDIDATE_BLOCKED"
+    );
+}
+
 static void audit_coinbase_order_preview_if_needed(
     BotState *state,
     StrategySettings *settings
@@ -406,13 +472,34 @@ static void audit_coinbase_order_preview_if_needed(
             local_preview.net_profit
         );
 
-        if (safety.allowed) {
+        {
             OrderExecutionPlan plan = order_executor_plan_market_sell_dry_run(
                 "BTC-EUR",
                 state->btc_balance,
                 preview
             );
-            audit_order_execution_plan("ORDER_EXECUTOR_SELL", plan, state, settings);
+
+            if (safety.allowed) {
+                audit_order_execution_plan("ORDER_EXECUTOR_SELL", plan, state, settings);
+            } else {
+                char blocked_reason[256];
+
+                snprintf(
+                    blocked_reason,
+                    sizeof(blocked_reason),
+                    "SELL candidate bloccato | %.140s | net %.2f | profit %.2f EUR %.2f%%",
+                    safety.reason,
+                    local_preview.net_value,
+                    local_preview.net_profit,
+                    local_preview.net_profit_percent
+                );
+
+                record_blocked_preview_candidate(
+                    plan,
+                    "SELL_CANDIDATE_BLOCKED",
+                    blocked_reason
+                );
+            }
         }
 
         return;
@@ -454,13 +541,33 @@ static void audit_coinbase_order_preview_if_needed(
             0.0
         );
 
-        if (safety.allowed) {
+        {
             OrderExecutionPlan plan = order_executor_plan_market_buy_dry_run(
                 "BTC-EUR",
                 settings->slot_amount_eur,
                 preview
             );
-            audit_order_execution_plan("ORDER_EXECUTOR_BUY", plan, state, settings);
+
+            if (safety.allowed) {
+                audit_order_execution_plan("ORDER_EXECUTOR_BUY", plan, state, settings);
+            } else {
+                char blocked_reason[256];
+
+                snprintf(
+                    blocked_reason,
+                    sizeof(blocked_reason),
+                    "BUY candidate bloccato | %.150s | quote %.2f | fee %.2f",
+                    safety.reason,
+                    settings->slot_amount_eur,
+                    safety.exchange_fee_eur
+                );
+
+                record_blocked_preview_candidate(
+                    plan,
+                    "BUY_CANDIDATE_BLOCKED",
+                    blocked_reason
+                );
+            }
         }
     }
 }
@@ -558,7 +665,7 @@ static void sync_state_from_remote_wallet(
                 sizeof(state->last_trade),
                 "LIVE_READONLY sync: BTC rilevato | avg %.2f EUR | cost %.2f EUR",
                 state->avg_buy_price,
-                position_summary->cost_basis_eur
+                current_cost_basis(state)
             );
         } else {
             snprintf(
@@ -579,6 +686,73 @@ static void sync_state_from_remote_wallet(
     }
 }
 
+
+static int enforce_micro_live_stop_after_real_order(
+    BotState *state,
+    StrategySettings *settings
+) {
+    if (state == NULL || settings == NULL) {
+        return 0;
+    }
+
+    if (!settings->micro_live_stop_after_real_order) {
+        return 0;
+    }
+
+    if (order_journal_real_sent_last_24h() <= 0) {
+        return 0;
+    }
+
+    PostOrderReconciliationCheck post_recon =
+        post_order_reconciliation_check_latest_real_order(state, settings);
+
+    if (strcmp(post_recon.decision, "NO_REAL_ORDER") != 0) {
+        audit_engine_decision(
+            "POST_ORDER_RECONCILIATION",
+            post_recon.decision,
+            post_recon.reason,
+            state->current_price,
+            state->btc_balance,
+            state->eur_balance,
+            0.0,
+            0.0
+        );
+    }
+
+    if (!state->running && !settings->live_trading_armed) {
+        return 1;
+    }
+
+    state->running = false;
+    state->mode = BOT_MODE_PAUSED;
+
+    snprintf(
+        state->last_trade,
+        sizeof(state->last_trade),
+        "Micro-live: stop automatico dopo ordine reale"
+    );
+
+    if (settings->live_trading_armed) {
+        settings->live_trading_armed = 0;
+        settings_save(settings);
+    }
+
+    db_save_state(state);
+
+    audit_engine_decision(
+        "MICRO_LIVE",
+        "STOP_AFTER_REAL_ORDER",
+        "Bot fermato e LIVE_TRADING disarmato dopo ordine reale registrato nel journal",
+        state->current_price,
+        state->btc_balance,
+        state->eur_balance,
+        0.0,
+        0.0
+    );
+
+    return 1;
+}
+
 void helix_engine_tick(BotState *state) {
     static int order_journal_ready = 0;
     StrategySettings settings = settings_load();
@@ -588,6 +762,10 @@ void helix_engine_tick(BotState *state) {
     }
 
     audit_engine_cleanup_if_needed(&settings);
+
+    if (enforce_micro_live_stop_after_real_order(state, &settings)) {
+        return;
+    }
 
     if (!state->running) {
         state->mode = BOT_MODE_PAUSED;

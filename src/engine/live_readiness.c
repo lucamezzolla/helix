@@ -122,16 +122,19 @@ LiveReadinessReport live_readiness_check(
         append_reason(&report, "BLOCK: ", recovery_reason);
     }
 
+#ifndef HELIX_ENABLE_REAL_COINBASE_ORDERS
     /*
-     * Real execution is intentionally still not implemented.
-     * This keeps the readiness report honest even if every external flag is enabled.
+     * Normal builds must never be considered ready for real execution.
+     * The live executor is compiled only in Makefile.live with the explicit
+     * HELIX_ENABLE_REAL_COINBASE_ORDERS flag.
      */
     report.blocking_count++;
     append_reason(
         &report,
         "BLOCK: ",
-        "executor reale Coinbase non implementato: invio ordini ancora impossibile"
+        "build normale: HELIX_ENABLE_REAL_COINBASE_ORDERS non attivo"
     );
+#endif
 
     if (state->running == 0) {
         report.warning_count++;

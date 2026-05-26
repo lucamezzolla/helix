@@ -68,7 +68,19 @@ ApiHealthReport api_health_check_light(
 
     if (settings->runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
         report.warning_count++;
-        append_reason(&report, "WARN: ", "LIVE_TRADING selezionato ma invio reale ancora bloccato dal codice");
+#ifdef HELIX_ENABLE_REAL_COINBASE_ORDERS
+        append_reason(
+            &report,
+            "WARN: ",
+            "LIVE_TRADING selezionato: build live compilata, esecuzione reale ancora soggetta a .env e safety gate"
+        );
+#else
+        append_reason(
+            &report,
+            "WARN: ",
+            "LIVE_TRADING selezionato ma build normale senza HELIX_ENABLE_REAL_COINBASE_ORDERS"
+        );
+#endif
     }
 
     if (settings->estimated_fee_percent < 0.0 || settings->estimated_fee_percent >= 100.0) {

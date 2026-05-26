@@ -26,4 +26,9 @@ PostOrderReconciliationCheck post_order_reconciliation_check_after_plan(
     const OrderExecutionPlan *plan
 );
 
+PostOrderReconciliationCheck post_order_reconciliation_check_latest_real_order(
+    BotState *state,
+    const StrategySettings *settings
+);
+
 #endif

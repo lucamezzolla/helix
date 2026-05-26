@@ -27,6 +27,9 @@ typedef struct {
     int order_cooldown_seconds;
     double max_daily_loss_eur;
     double max_drawdown_percent;
+    int micro_live_enabled;
+    double micro_live_max_order_eur;
+    int micro_live_stop_after_real_order;
     RuntimeMode runtime_mode;
 } StrategySettings;
 

@@ -152,7 +152,7 @@ ReconciliationReport reconciliation_check_live_readonly(
             "Reconciliation: wallet e posizione BTC coerenti",
             eur_delta,
             btc_delta,
-            position_summary->cost_basis_eur,
+            state->btc_balance * position_summary->avg_buy_price,
             position_summary->avg_buy_price
         );
     }

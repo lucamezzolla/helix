@@ -50,6 +50,9 @@ static double parse_double_setting(const char *value, double fallback) {
 #define KEY_ORDER_COOLDOWN_SECONDS "safety.order_cooldown_seconds"
 #define KEY_MAX_DAILY_LOSS_EUR "safety.max_daily_loss_eur"
 #define KEY_MAX_DRAWDOWN_PERCENT "safety.max_drawdown_percent"
+#define KEY_MICRO_LIVE_ENABLED "micro_live.enabled"
+#define KEY_MICRO_LIVE_MAX_ORDER_EUR "micro_live.max_order_eur"
+#define KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER "micro_live.stop_after_real_order"
 #define KEY_RUNTIME_MODE "runtime.mode"
 
 static double get_double_setting(const char *key, double fallback) {
@@ -151,6 +154,9 @@ StrategySettings settings_default(void) {
     settings.order_cooldown_seconds = 300;
     settings.max_daily_loss_eur = 25.0;
     settings.max_drawdown_percent = 8.0;
+    settings.micro_live_enabled = 0;
+    settings.micro_live_max_order_eur = 20.0;
+    settings.micro_live_stop_after_real_order = 1;
     settings.runtime_mode = RUNTIME_MODE_SIMULATION;
 
     return settings;
@@ -176,6 +182,9 @@ void settings_save(StrategySettings *settings) {
     set_int_setting(KEY_ORDER_COOLDOWN_SECONDS, settings->order_cooldown_seconds);
     set_double_setting(KEY_MAX_DAILY_LOSS_EUR, settings->max_daily_loss_eur);
     set_double_setting(KEY_MAX_DRAWDOWN_PERCENT, settings->max_drawdown_percent);
+    set_int_setting(KEY_MICRO_LIVE_ENABLED, settings->micro_live_enabled ? 1 : 0);
+    set_double_setting(KEY_MICRO_LIVE_MAX_ORDER_EUR, settings->micro_live_max_order_eur);
+    set_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, settings->micro_live_stop_after_real_order ? 1 : 0);
     set_runtime_mode_setting(settings->runtime_mode);
 }
 
@@ -257,6 +266,18 @@ void settings_save_defaults_if_missing(void) {
 
     if (!db_get_setting(KEY_MAX_DRAWDOWN_PERCENT, buffer, sizeof(buffer))) {
         set_double_setting(KEY_MAX_DRAWDOWN_PERCENT, defaults.max_drawdown_percent);
+    }
+
+    if (!db_get_setting(KEY_MICRO_LIVE_ENABLED, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_MICRO_LIVE_ENABLED, defaults.micro_live_enabled);
+    }
+
+    if (!db_get_setting(KEY_MICRO_LIVE_MAX_ORDER_EUR, buffer, sizeof(buffer))) {
+        set_double_setting(KEY_MICRO_LIVE_MAX_ORDER_EUR, defaults.micro_live_max_order_eur);
+    }
+
+    if (!db_get_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, defaults.micro_live_stop_after_real_order);
     }
 
     if (!db_get_setting(KEY_RUNTIME_MODE, buffer, sizeof(buffer))) {
@@ -367,6 +388,19 @@ StrategySettings settings_load(void) {
 
     if (settings.max_drawdown_percent < 0.0) {
         settings.max_drawdown_percent = defaults.max_drawdown_percent;
+    }
+
+    settings.micro_live_enabled =
+        get_int_setting(KEY_MICRO_LIVE_ENABLED, defaults.micro_live_enabled) ? 1 : 0;
+
+    settings.micro_live_max_order_eur =
+        get_double_setting(KEY_MICRO_LIVE_MAX_ORDER_EUR, defaults.micro_live_max_order_eur);
+
+    settings.micro_live_stop_after_real_order =
+        get_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, defaults.micro_live_stop_after_real_order) ? 1 : 0;
+
+    if (settings.micro_live_max_order_eur <= 0.0 || settings.micro_live_max_order_eur > 50.0) {
+        settings.micro_live_max_order_eur = defaults.micro_live_max_order_eur;
     }
 
     settings.runtime_mode =

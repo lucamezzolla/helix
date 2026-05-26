@@ -502,7 +502,7 @@ static void parse_create_order_response(
         snprintf(
             result->reason,
             sizeof(result->reason),
-            "Coinbase create-order rejected | %.80s | %.100s | %.60s",
+            "Coinbase create-order rejected | %.40s | %.80s | %.40s",
             error ? error : "unknown_error",
             message ? message : "no_message",
             details ? details : "no_details"

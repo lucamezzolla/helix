@@ -7,6 +7,7 @@
 #include "../engine/live_readiness.h"
 #include "../engine/api_health.h"
 #include "../engine/order_journal.h"
+#include "../engine/trade_preview.h"
 #include "../exchange/coinbase_client.h"
 #include "../wallet/wallet_info.h"
 #include "../config/env_loader.h"
@@ -84,6 +85,9 @@ typedef struct {
     GtkWidget *order_cooldown_seconds_entry;
     GtkWidget *max_daily_loss_eur_entry;
     GtkWidget *max_drawdown_percent_entry;
+    GtkWidget *micro_live_enabled_entry;
+    GtkWidget *micro_live_max_order_eur_entry;
+    GtkWidget *micro_live_stop_after_real_order_entry;
     GtkWidget *emergency_stop_label;
     GtkWidget *live_trading_arm_label;
     GtkWidget *live_trading_arm_buttons_box;
@@ -144,6 +148,14 @@ static const char *bot_mode_to_string(BotMode mode) {
         default:
             return "UNKNOWN";
     }
+}
+
+static const char *real_executor_build_status_text(void) {
+#ifdef HELIX_ENABLE_REAL_COINBASE_ORDERS
+    return "compilato nella build live; esecuzione reale ancora soggetta a .env e safety gate";
+#else
+    return "presente ma bloccato dalla build normale";
+#endif
 }
 
 static void free_app_widgets(gpointer data) {
@@ -423,7 +435,7 @@ static void refresh_dashboard(AppWidgets *widgets) {
     snprintf(
         settings_text,
         sizeof(settings_text),
-        "Strategia: slot %.2f € | buy drop %.2f%% | sell %.2f%% | fee stimata %.2f%% | min profit %.2f € / %.2f%% | liquidità min %.2f%% | riserva %.2f%% | slot riserva sbloccati %d | max slot %d | audit %d giorni | max ordini/giorno %d | cooldown %d sec | max loss %.2f € | max drawdown %.2f%% | kill-switch %s | live arm %s",
+        "Strategia: slot %.2f € | buy drop %.2f%% | sell %.2f%% | fee stimata %.2f%% | min profit %.2f € / %.2f%% | liquidità min %.2f%% | riserva %.2f%% | slot riserva sbloccati %d | max slot %d | audit %d giorni | max ordini/giorno %d | cooldown %d sec | max loss %.2f € | max drawdown %.2f%% | micro-live %s | max micro ordine %.2f € | stop dopo ordine %s | kill-switch %s | live arm %s",
         settings.slot_amount_eur,
         settings.buy_drop_percent,
         settings.sell_profit_percent,
@@ -439,6 +451,9 @@ static void refresh_dashboard(AppWidgets *widgets) {
         settings.order_cooldown_seconds,
         settings.max_daily_loss_eur,
         settings.max_drawdown_percent,
+        settings.micro_live_enabled ? "ATTIVO" : "disattivato",
+        settings.micro_live_max_order_eur,
+        settings.micro_live_stop_after_real_order ? "ATTIVO" : "disattivato",
         settings.emergency_stop_enabled ? "ATTIVO" : "disattivato",
         settings.live_trading_armed ? "ATTIVO" : "disattivato"
     );
@@ -467,12 +482,30 @@ static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
 
     gtk_widget_set_size_request(label, 170, -1);
     gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 24);
     gtk_widget_set_hexpand(entry, TRUE);
 
     gtk_box_append(GTK_BOX(row), label);
     gtk_box_append(GTK_BOX(row), entry);
 
     return row;
+}
+
+static void configure_dashboard_label(GtkWidget *label) {
+    if (label == NULL) {
+        return;
+    }
+
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(label, TRUE);
+
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 90);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_NONE);
 }
 
 static GtkWidget *create_main_menu_bar(void) {
@@ -496,6 +529,7 @@ static GtkWidget *create_main_menu_bar(void) {
     g_menu_append(view_menu, "Audit decisioni", "win.show-engine-audit");
     g_menu_append(view_menu, "Report pre-live", "win.show-prelive-report");
     g_menu_append(view_menu, "Stato protezioni", "win.show-safety-status");
+    g_menu_append(view_menu, "Simula scenario dry-run", "win.show-dryrun-scenario");
     g_menu_append(view_menu, "Esporta report pre-live", "win.export-prelive-report");
     g_menu_append(view_menu, "Esporta snapshot stato", "win.export-status-snapshot");
     g_menu_append_submenu(menu_bar_model, "Visualizza", G_MENU_MODEL(view_menu));
@@ -649,6 +683,15 @@ static void fill_settings_entries(AppWidgets *widgets) {
 
     snprintf(buffer, sizeof(buffer), "%.2f", settings.max_drawdown_percent);
     gtk_editable_set_text(GTK_EDITABLE(widgets->max_drawdown_percent_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%d", settings.micro_live_enabled ? 1 : 0);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->micro_live_enabled_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%.2f", settings.micro_live_max_order_eur);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->micro_live_max_order_eur_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%d", settings.micro_live_stop_after_real_order ? 1 : 0);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->micro_live_stop_after_real_order_entry), buffer);
 
     if (widgets->emergency_stop_label != NULL) {
         gtk_label_set_text(
@@ -1037,6 +1080,15 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
     settings.max_drawdown_percent =
         parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->max_drawdown_percent_entry)));
 
+    settings.micro_live_enabled =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->micro_live_enabled_entry))) ? 1 : 0;
+
+    settings.micro_live_max_order_eur =
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(widgets->micro_live_max_order_eur_entry)));
+
+    settings.micro_live_stop_after_real_order =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->micro_live_stop_after_real_order_entry))) ? 1 : 0;
+
     settings.runtime_mode =
         get_selected_runtime_mode(widgets->runtime_mode_dropdown);
 
@@ -1061,7 +1113,9 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
         settings.max_orders_per_day <= 0 ||
         settings.order_cooldown_seconds < 0 ||
         settings.max_daily_loss_eur < 0.0 ||
-        settings.max_drawdown_percent < 0.0
+        settings.max_drawdown_percent < 0.0 ||
+        settings.micro_live_max_order_eur <= 0.0 ||
+        settings.micro_live_max_order_eur > 50.0
     ) {
         gtk_label_set_text(
             GTK_LABEL(widgets->status_label),
@@ -1112,6 +1166,348 @@ static void on_stop_clicked(GtkButton *button, gpointer user_data) {
 
     refresh_dashboard(widgets);
 }
+
+
+typedef struct {
+    AppWidgets *app_widgets;
+    GtkWidget *eur_entry;
+    GtkWidget *btc_entry;
+    GtkWidget *price_entry;
+    GtkWidget *used_slots_entry;
+    GtkWidget *result_label;
+} DryRunScenarioWidgets;
+
+static void set_entry_double(GtkWidget *entry, double value, int decimals) {
+    char buffer[64];
+
+    if (entry == NULL) {
+        return;
+    }
+
+    if (decimals <= 2) {
+        snprintf(buffer, sizeof(buffer), "%.2f", value);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
+    }
+
+    gtk_editable_set_text(GTK_EDITABLE(entry), buffer);
+}
+
+static void set_entry_int(GtkWidget *entry, int value) {
+    char buffer[32];
+
+    if (entry == NULL) {
+        return;
+    }
+
+    snprintf(buffer, sizeof(buffer), "%d", value);
+    gtk_editable_set_text(GTK_EDITABLE(entry), buffer);
+}
+
+static void calculate_dryrun_scenario(DryRunScenarioWidgets *scenario) {
+    if (
+        scenario == NULL ||
+        scenario->app_widgets == NULL ||
+        scenario->app_widgets->state == NULL ||
+        scenario->result_label == NULL
+    ) {
+        return;
+    }
+
+    StrategySettings settings = settings_load();
+
+    double eur_balance =
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(scenario->eur_entry)));
+    double btc_balance =
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(scenario->btc_entry)));
+    double current_price =
+        parse_decimal_input(gtk_editable_get_text(GTK_EDITABLE(scenario->price_entry)));
+    int used_slots =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(scenario->used_slots_entry)));
+
+    if (used_slots < 0) {
+        used_slots = 0;
+    }
+
+    double fee_rate = settings.estimated_fee_percent / 100.0;
+    double slot_amount = settings.slot_amount_eur;
+    double protected_eur = eur_balance * (settings.liquidity_reserve_percent / 100.0);
+    double released_eur = settings.reserve_released_slots * slot_amount;
+    double operational_eur = eur_balance - protected_eur + released_eur;
+
+    if (operational_eur < 0.0) {
+        operational_eur = 0.0;
+    }
+
+    if (operational_eur > eur_balance) {
+        operational_eur = eur_balance;
+    }
+
+    int slots_available = settings.max_slots - used_slots;
+    if (slots_available < 0) {
+        slots_available = 0;
+    }
+
+    int buy_possible =
+        current_price > 0.0 &&
+        slot_amount > 0.0 &&
+        operational_eur >= slot_amount &&
+        slots_available > 0 &&
+        settings.emergency_stop_enabled == 0;
+
+    TradePreview buy_preview = trade_preview_buy(
+        slot_amount,
+        current_price,
+        fee_rate
+    );
+
+    double avg_buy_price = scenario->app_widgets->state->avg_buy_price;
+    if (avg_buy_price <= 0.0 && current_price > 0.0) {
+        avg_buy_price = current_price;
+    }
+
+    double cost_basis = btc_balance * avg_buy_price;
+
+    TradePreview sell_preview = trade_preview_sell(
+        btc_balance,
+        current_price,
+        cost_basis,
+        fee_rate,
+        settings.min_profit_eur,
+        settings.min_profit_percent
+    );
+
+    const char *buy_decision = "BLOCK";
+    const char *buy_reason = "condizioni BUY non sufficienti";
+
+    if (settings.emergency_stop_enabled) {
+        buy_reason = "kill-switch attivo";
+    } else if (current_price <= 0.0) {
+        buy_reason = "prezzo non valido";
+    } else if (slots_available <= 0) {
+        buy_reason = "nessuno slot libero";
+    } else if (operational_eur < slot_amount) {
+        buy_reason = "liquidità operativa insufficiente";
+    } else if (buy_possible && buy_preview.net_value > 0.0) {
+        buy_decision = "ALLOW";
+        buy_reason = "BUY simulato consentito dai vincoli locali";
+    }
+
+    const char *sell_decision = "BLOCK";
+    const char *sell_reason = "condizioni SELL non sufficienti";
+
+    if (settings.emergency_stop_enabled) {
+        sell_reason = "kill-switch attivo";
+    } else if (current_price <= 0.0) {
+        sell_reason = "prezzo non valido";
+    } else if (btc_balance <= 0.0) {
+        sell_reason = "nessun BTC disponibile";
+    } else if (sell_preview.allowed) {
+        sell_decision = "ALLOW";
+        sell_reason = "SELL simulato consentito: profitto netto sufficiente";
+    } else {
+        sell_reason = "SELL simulato bloccato: profitto netto insufficiente";
+    }
+
+    char result[4096];
+
+    snprintf(
+        result,
+        sizeof(result),
+        "=== SCENARIO INSERITO ===\n"
+        "EUR simulati: %.2f\n"
+        "BTC simulati: %.8f\n"
+        "Prezzo BTC-EUR simulato: %.2f\n"
+        "Slot usati simulati: %d / %d\n\n"
+
+        "=== LIQUIDITÀ ===\n"
+        "Riserva protetta: %.2f%% = %.2f EUR\n"
+        "Slot riserva sbloccati: %d\n"
+        "Liquidità rilasciata: %.2f EUR\n"
+        "Liquidità operativa stimata: %.2f EUR\n"
+        "Slot EUR: %.2f\n"
+        "Slot liberi: %d\n\n"
+
+        "=== BUY DRY-RUN ===\n"
+        "Decisione: %s\n"
+        "Motivo: %s\n"
+        "EUR impegnati: %.2f\n"
+        "Fee stimata: %.2f\n"
+        "BTC stimati: %.8f\n"
+        "Prezzo medio effettivo stimato: %.2f\n\n"
+
+        "=== SELL DRY-RUN ===\n"
+        "Decisione: %s\n"
+        "Motivo: %s\n"
+        "Valore lordo: %.2f\n"
+        "Fee stimata: %.2f\n"
+        "Netto vendita: %.2f\n"
+        "Cost basis stimato: %.2f\n"
+        "Profitto netto stimato: %.2f EUR\n"
+        "Profitto netto stimato: %.2f%%\n\n"
+
+        "Nota: questa simulazione non legge Coinbase e non invia ordini reali.",
+        eur_balance,
+        btc_balance,
+        current_price,
+        used_slots,
+        settings.max_slots,
+
+        settings.liquidity_reserve_percent,
+        protected_eur,
+        settings.reserve_released_slots,
+        released_eur,
+        operational_eur,
+        slot_amount,
+        slots_available,
+
+        buy_decision,
+        buy_reason,
+        slot_amount,
+        buy_preview.estimated_fee,
+        buy_preview.net_value,
+        buy_preview.net_value > 0.0 ? slot_amount / buy_preview.net_value : 0.0,
+
+        sell_decision,
+        sell_reason,
+        sell_preview.gross_value,
+        sell_preview.estimated_fee,
+        sell_preview.net_value,
+        sell_preview.cost_basis,
+        sell_preview.net_profit,
+        sell_preview.net_profit_percent
+    );
+
+    gtk_label_set_text(GTK_LABEL(scenario->result_label), result);
+}
+
+static void on_dryrun_scenario_calculate_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    calculate_dryrun_scenario((DryRunScenarioWidgets *)user_data);
+}
+
+static void on_dryrun_scenario_use_current_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    DryRunScenarioWidgets *scenario = user_data;
+
+    if (scenario == NULL || scenario->app_widgets == NULL || scenario->app_widgets->state == NULL) {
+        return;
+    }
+
+    BotState *state = scenario->app_widgets->state;
+
+    set_entry_double(scenario->eur_entry, state->eur_balance, 2);
+    set_entry_double(scenario->btc_entry, state->btc_balance, 8);
+    set_entry_double(scenario->price_entry, state->current_price, 2);
+    set_entry_int(scenario->used_slots_entry, state->used_slots);
+
+    calculate_dryrun_scenario(scenario);
+}
+
+static void on_dryrun_scenario_close_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    GtkWidget *dialog = user_data;
+
+    if (dialog != NULL) {
+        gtk_window_close(GTK_WINDOW(dialog));
+    }
+}
+
+static void show_dryrun_scenario_dialog(AppWidgets *widgets) {
+    if (widgets == NULL || widgets->window == NULL || widgets->state == NULL) {
+        return;
+    }
+
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Simula scenario dry-run");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(widgets->window));
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 760, -1);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top(box, 18);
+    gtk_widget_set_margin_bottom(box, 18);
+    gtk_widget_set_margin_start(box, 18);
+    gtk_widget_set_margin_end(box, 18);
+
+    GtkWidget *description = gtk_label_new(
+        "Inserisci valori ipotetici per vedere cosa farebbe Helix in dry-run. "
+        "La simulazione non modifica wallet, DB, Coinbase o ordini."
+    );
+    gtk_label_set_wrap(GTK_LABEL(description), TRUE);
+    gtk_widget_set_halign(description, GTK_ALIGN_START);
+
+    GtkWidget *eur_entry = gtk_entry_new();
+    GtkWidget *btc_entry = gtk_entry_new();
+    GtkWidget *price_entry = gtk_entry_new();
+    GtkWidget *used_slots_entry = gtk_entry_new();
+
+    set_entry_double(eur_entry, widgets->state->eur_balance, 2);
+    set_entry_double(btc_entry, widgets->state->btc_balance, 8);
+    set_entry_double(price_entry, widgets->state->current_price, 2);
+    set_entry_int(used_slots_entry, widgets->state->used_slots);
+
+    GtkWidget *result_label = gtk_label_new("");
+    gtk_label_set_wrap(GTK_LABEL(result_label), TRUE);
+    gtk_label_set_selectable(GTK_LABEL(result_label), TRUE);
+    gtk_widget_set_halign(result_label, GTK_ALIGN_START);
+
+    GtkWidget *result_scrolled = gtk_scrolled_window_new();
+    gtk_widget_set_size_request(result_scrolled, -1, 320);
+    gtk_scrolled_window_set_policy(
+        GTK_SCROLLED_WINDOW(result_scrolled),
+        GTK_POLICY_AUTOMATIC,
+        GTK_POLICY_AUTOMATIC
+    );
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(result_scrolled), result_label);
+
+    GtkWidget *buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *calculate_button = gtk_button_new_with_label("Calcola scenario");
+    GtkWidget *use_current_button = gtk_button_new_with_label("Usa valori correnti");
+    GtkWidget *close_button = gtk_button_new_with_label("Chiudi");
+
+    gtk_box_append(GTK_BOX(buttons_box), calculate_button);
+    gtk_box_append(GTK_BOX(buttons_box), use_current_button);
+    gtk_box_append(GTK_BOX(buttons_box), close_button);
+
+    gtk_box_append(GTK_BOX(box), description);
+    gtk_box_append(GTK_BOX(box), create_setting_row("EUR simulati", eur_entry));
+    gtk_box_append(GTK_BOX(box), create_setting_row("BTC simulati", btc_entry));
+    gtk_box_append(GTK_BOX(box), create_setting_row("Prezzo BTC-EUR simulato", price_entry));
+    gtk_box_append(GTK_BOX(box), create_setting_row("Slot usati simulati", used_slots_entry));
+    gtk_box_append(GTK_BOX(box), buttons_box);
+    gtk_box_append(GTK_BOX(box), result_scrolled);
+
+    DryRunScenarioWidgets *scenario = g_malloc0(sizeof(DryRunScenarioWidgets));
+    scenario->app_widgets = widgets;
+    scenario->eur_entry = eur_entry;
+    scenario->btc_entry = btc_entry;
+    scenario->price_entry = price_entry;
+    scenario->used_slots_entry = used_slots_entry;
+    scenario->result_label = result_label;
+
+    g_object_set_data_full(
+        G_OBJECT(dialog),
+        "helix-dryrun-scenario",
+        scenario,
+        g_free
+    );
+
+    g_signal_connect(calculate_button, "clicked", G_CALLBACK(on_dryrun_scenario_calculate_clicked), scenario);
+    g_signal_connect(use_current_button, "clicked", G_CALLBACK(on_dryrun_scenario_use_current_clicked), scenario);
+    g_signal_connect(close_button, "clicked", G_CALLBACK(on_dryrun_scenario_close_clicked), dialog);
+    g_signal_connect(dialog, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
+
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+
+    calculate_dryrun_scenario(scenario);
+
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
 
 static void on_menu_start_bot_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action;
@@ -1223,7 +1619,7 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
     db_get_engine_audit_summary_last_days(&audit_summary, 7);
 
     int dry_run_target = 20;
-    int dry_run_missing = dry_run_target - prelive_report.dry_run_last_7_days;
+    int dry_run_missing = dry_run_target - prelive_report.dry_run_ready_last_7_days;
     if (dry_run_missing < 0) {
         dry_run_missing = 0;
     }
@@ -1250,7 +1646,7 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
     if (
         readiness.blocking_count == 0 &&
         api_health.blocking_count == 0 &&
-        prelive_report.dry_run_last_7_days >= dry_run_target &&
+        prelive_report.dry_run_ready_last_7_days >= dry_run_target &&
         prelive_report.final_gate_ok_last_7_days > 0 &&
         prelive_report.post_order_recon_blocked_last_7_days == 0 &&
         prelive_report.real_sent_last_7_days == 0
@@ -1282,10 +1678,13 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
         "Motivo: %.500s\n\n"
 
         "=== DRY-RUN E JOURNAL ===\n"
-        "Dry-run ultimi 7 giorni: %d / %d\n"
-        "  BUY dry-run: %d\n"
-        "  SELL dry-run: %d\n"
-        "Dry-run mancanti alla soglia minima: %d\n"
+        "Dry-run totali ultimi 7 giorni: %d\n"
+        "Dry-run validi: %d / %d\n"
+        "Dry-run bloccati correttamente: %d\n"
+        "  BUY totali/validi/bloccati: %d / %d / %d\n"
+        "  SELL totali/validi/bloccati: %d / %d / %d\n"
+        "  SELL bloccati perché non profittevoli: %d\n"
+        "Dry-run validi mancanti alla soglia minima: %d\n"
         "Journal ultime 24h: %d\n"
         "Ultimo client_order_id: %s\n"
         "Ultimo evento journal: %s\n"
@@ -1322,6 +1721,7 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
         "%s\n"
         "%s\n"
         "%s\n"
+        "%s\n"
         "%s\n\n"
 
         "Nota: questo report è diagnostico. Non abilita ordini reali.",
@@ -1346,9 +1746,16 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
         api_health.reason,
 
         prelive_report.dry_run_last_7_days,
+        prelive_report.dry_run_ready_last_7_days,
         dry_run_target,
+        prelive_report.dry_run_blocked_last_7_days,
         prelive_report.buy_dry_run_last_7_days,
+        prelive_report.buy_dry_run_ready_last_7_days,
+        prelive_report.buy_dry_run_blocked_last_7_days,
         prelive_report.sell_dry_run_last_7_days,
+        prelive_report.sell_dry_run_ready_last_7_days,
+        prelive_report.sell_dry_run_blocked_last_7_days,
+        prelive_report.sell_blocked_not_profitable_last_7_days,
         dry_run_missing,
         prelive_report.journal_entries_last_24h,
         prelive_report.last_client_order_id[0] ? prelive_report.last_client_order_id : "nessuno",
@@ -1381,8 +1788,11 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
         prelive_report.last_block_reason,
 
         dry_run_missing > 0 ?
-            "- Continua a far girare Helix in LIVE_READONLY + dry-run." :
-            "- Soglia dry-run minima raggiunta: revisiona audit e journal prima di qualunque live.",
+            "- Continua a far girare Helix in LIVE_READONLY + dry-run: servono ancora dry-run validi." :
+            "- Soglia dry-run valida raggiunta: revisiona audit e journal prima di qualunque live.",
+        prelive_report.dry_run_blocked_last_7_days > 0 ?
+            "- I dry-run bloccati correttamente sono utili: indicano che i gate stanno evitando operazioni non convenienti o non sicure." :
+            "- Nessun dry-run bloccato registrato negli ultimi 7 giorni.",
         prelive_report.real_sent_last_7_days > 0 ?
             "- ATTENZIONE: risultano ordini reali nel journal. Verifica subito Coinbase e DB." :
             "- Nessun ordine reale risulta inviato negli ultimi 7 giorni.",
@@ -1504,7 +1914,7 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         "LIVE_TRADING arm: %s\n"
         "Readiness: %s (%d blocchi, %d warning)\n"
         "API health: %s (%d blocchi, %d warning)\n"
-        "Executor reale: presente ma bloccato dalla build normale\n\n"
+        "Executor reale: %s\n\n"
 
         "=== LIQUIDITÀ E SLOT ===\n"
         "Slot EUR: %.2f\n"
@@ -1518,6 +1928,7 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         "Cooldown ordini: %d sec\n"
         "Max perdita giornaliera: %.2f EUR\n"
         "Max drawdown: %.2f%%\n"
+        "Micro-live: %s | max ordine %.2f EUR | stop dopo ordine %s\n"
         "Volatilità: max %.2f%% in %d sec\n\n"
 
         "=== AUDIT ULTIMI 7 GIORNI ===\n"
@@ -1551,6 +1962,7 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         api_health.status,
         api_health.blocking_count,
         api_health.warning_count,
+        real_executor_build_status_text(),
 
         settings.slot_amount_eur,
         settings.liquidity_reserve_percent,
@@ -1563,6 +1975,9 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         settings.order_cooldown_seconds,
         settings.max_daily_loss_eur,
         settings.max_drawdown_percent,
+        settings.micro_live_enabled ? "ATTIVO" : "disattivato",
+        settings.micro_live_max_order_eur,
+        settings.micro_live_stop_after_real_order ? "ATTIVO" : "disattivato",
         settings.volatility_max_move_percent,
         settings.volatility_window_seconds,
 
@@ -1642,6 +2057,17 @@ static void on_menu_export_status_snapshot_action(GSimpleAction *action, GVarian
         widgets,
         "Snapshot stato esportato in data/status_snapshot.txt"
     );
+}
+
+
+static void on_menu_show_dryrun_scenario_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    show_dryrun_scenario_dialog(widgets);
+    set_temporary_status_message(widgets, "Visualizza: simulatore dry-run aperto");
 }
 
 static void on_menu_show_help_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -1745,6 +2171,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *order_cooldown_seconds_entry;
     GtkWidget *max_daily_loss_eur_entry;
     GtkWidget *max_drawdown_percent_entry;
+    GtkWidget *micro_live_enabled_entry;
+    GtkWidget *micro_live_max_order_eur_entry;
+    GtkWidget *micro_live_stop_after_real_order_entry;
     GtkWidget *emergency_stop_label;
     GtkWidget *live_trading_arm_label;
     GtkWidget *live_trading_arm_buttons_box;
@@ -1791,27 +2220,34 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     window = gtk_application_window_new(app);
 
     gtk_window_set_title(GTK_WINDOW(window), "Helix");
-    gtk_window_set_default_size(GTK_WINDOW(window), 980, 800);
+    gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
+    gtk_window_set_resizable(GTK_WINDOW(window), TRUE);
 
     menu_bar = create_main_menu_bar();
 
     root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_hexpand(root_box, TRUE);
+    gtk_widget_set_vexpand(root_box, TRUE);
 
     page_scrolled_window = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(
         GTK_SCROLLED_WINDOW(page_scrolled_window),
-        GTK_POLICY_NEVER,
+        GTK_POLICY_AUTOMATIC,
         GTK_POLICY_AUTOMATIC
     );
+    gtk_widget_set_hexpand(page_scrolled_window, TRUE);
     gtk_widget_set_vexpand(page_scrolled_window, TRUE);
 
-    main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_top(main_box, 16);
-    gtk_widget_set_margin_bottom(main_box, 30);
-    gtk_widget_set_margin_start(main_box, 30);
-    gtk_widget_set_margin_end(main_box, 30);
+    main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_hexpand(main_box, TRUE);
+    gtk_widget_set_vexpand(main_box, TRUE);
+    gtk_widget_set_margin_top(main_box, 12);
+    gtk_widget_set_margin_bottom(main_box, 12);
+    gtk_widget_set_margin_start(main_box, 12);
+    gtk_widget_set_margin_end(main_box, 12);
 
-    top_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    top_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_hexpand(top_box, TRUE);
 
     price_label = gtk_label_new(price_text);
     eur_label = gtk_label_new(eur_text);
@@ -1827,35 +2263,36 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     settings_label = gtk_label_new("");
     status_label = gtk_label_new("");
 
-    gtk_widget_set_halign(price_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(eur_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(btc_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(slots_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(mode_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(runtime_mode_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(live_readiness_label, GTK_ALIGN_START);
-    gtk_label_set_wrap(GTK_LABEL(live_readiness_label), TRUE);
-    gtk_widget_set_halign(api_health_label, GTK_ALIGN_START);
-    gtk_label_set_wrap(GTK_LABEL(api_health_label), TRUE);
-    gtk_widget_set_halign(coinbase_credentials_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(remote_wallet_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(last_trade_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(settings_label, GTK_ALIGN_START);
-    gtk_widget_set_halign(status_label, GTK_ALIGN_START);
+    configure_dashboard_label(price_label);
+    configure_dashboard_label(eur_label);
+    configure_dashboard_label(btc_label);
+    configure_dashboard_label(slots_label);
+    configure_dashboard_label(mode_label);
+    configure_dashboard_label(runtime_mode_label);
+    configure_dashboard_label(live_readiness_label);
+    configure_dashboard_label(api_health_label);
+    configure_dashboard_label(coinbase_credentials_label);
+    configure_dashboard_label(remote_wallet_label);
+    configure_dashboard_label(last_trade_label);
+    configure_dashboard_label(settings_label);
+    configure_dashboard_label(status_label);
 
     settings_expander = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(settings_expander), "Impostazioni strategia");
     gtk_window_set_transient_for(GTK_WINDOW(settings_expander), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(settings_expander), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(settings_expander), 760, -1);
+    gtk_window_set_default_size(GTK_WINDOW(settings_expander), 760, 680);
+    gtk_window_set_resizable(GTK_WINDOW(settings_expander), TRUE);
     g_signal_connect(settings_expander, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     settings_dialog_scrolled_window = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(
         GTK_SCROLLED_WINDOW(settings_dialog_scrolled_window),
-        GTK_POLICY_NEVER,
+        GTK_POLICY_AUTOMATIC,
         GTK_POLICY_AUTOMATIC
     );
+    gtk_widget_set_size_request(settings_dialog_scrolled_window, -1, 620);
+    gtk_widget_set_vexpand(settings_dialog_scrolled_window, TRUE);
 
     settings_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_top(settings_box, 10);
@@ -1880,6 +2317,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     order_cooldown_seconds_entry = gtk_entry_new();
     max_daily_loss_eur_entry = gtk_entry_new();
     max_drawdown_percent_entry = gtk_entry_new();
+    micro_live_enabled_entry = gtk_entry_new();
+    micro_live_max_order_eur_entry = gtk_entry_new();
+    micro_live_stop_after_real_order_entry = gtk_entry_new();
 
     const char *runtime_modes[] = {
         "SIMULATION",
@@ -1934,6 +2374,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Cooldown ordini sec", order_cooldown_seconds_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Max perdita giornaliera EUR", max_daily_loss_eur_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Max drawdown %", max_drawdown_percent_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Micro-live attivo (0/1)", micro_live_enabled_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Micro-live max ordine EUR", micro_live_max_order_eur_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Stop dopo ordine reale (0/1)", micro_live_stop_after_real_order_entry));
     gtk_box_append(GTK_BOX(settings_box), emergency_stop_label);
     gtk_box_append(GTK_BOX(settings_box), emergency_buttons_box);
     gtk_box_append(GTK_BOX(settings_box), live_trading_arm_label);
@@ -1948,7 +2391,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(coinbase_expander), "Coinbase API");
     gtk_window_set_transient_for(GTK_WINDOW(coinbase_expander), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(coinbase_expander), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(coinbase_expander), 760, -1);
+    gtk_window_set_default_size(GTK_WINDOW(coinbase_expander), 760, 220);
     g_signal_connect(coinbase_expander, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     coinbase_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -1972,7 +2415,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(history_window), "Storico operazioni");
     gtk_window_set_transient_for(GTK_WINDOW(history_window), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(history_window), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(history_window), 900, -1);
+    gtk_window_set_default_size(GTK_WINDOW(history_window), 900, 420);
     g_signal_connect(history_window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     history_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -2001,7 +2444,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_title(GTK_WINDOW(audit_window), "Audit decisioni motore");
     gtk_window_set_transient_for(GTK_WINDOW(audit_window), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(audit_window), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(audit_window), 1000, -1);
+    gtk_window_set_default_size(GTK_WINDOW(audit_window), 1000, 480);
     g_signal_connect(audit_window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
 
     audit_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -2088,6 +2531,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->order_cooldown_seconds_entry = order_cooldown_seconds_entry;
     widgets->max_daily_loss_eur_entry = max_daily_loss_eur_entry;
     widgets->max_drawdown_percent_entry = max_drawdown_percent_entry;
+    widgets->micro_live_enabled_entry = micro_live_enabled_entry;
+    widgets->micro_live_max_order_eur_entry = micro_live_max_order_eur_entry;
+    widgets->micro_live_stop_after_real_order_entry = micro_live_stop_after_real_order_entry;
     widgets->emergency_stop_label = emergency_stop_label;
     widgets->live_trading_arm_label = live_trading_arm_label;
     widgets->live_trading_arm_buttons_box = live_trading_arm_buttons_box;
@@ -2133,6 +2579,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
         {
             .name = "show-safety-status",
             .activate = on_menu_show_safety_status_action
+        },
+        {
+            .name = "show-dryrun-scenario",
+            .activate = on_menu_show_dryrun_scenario_action
         },
         {
             .name = "export-prelive-report",

@@ -25,6 +25,12 @@
 #define COINBASE_FILLS_PATH \
     "/api/v3/brokerage/orders/historical/fills"
 
+#define COINBASE_ORDER_STATUS_URL_PREFIX \
+    "https://api.coinbase.com"
+
+#define COINBASE_ORDER_STATUS_PATH_PREFIX \
+    "/api/v3/brokerage/orders/historical/"
+
 typedef struct {
     char *memory;
     size_t size;
@@ -161,6 +167,30 @@ static const char *json_string_value(cJSON *item) {
     return NULL;
 }
 
+static int json_bool_value(cJSON *item) {
+    if (!item) {
+        return 0;
+    }
+
+    if (cJSON_IsBool(item)) {
+        return cJSON_IsTrue(item);
+    }
+
+    if (cJSON_IsNumber(item)) {
+        return item->valuedouble != 0.0;
+    }
+
+    if (cJSON_IsString(item) && item->valuestring) {
+        return (
+            strcmp(item->valuestring, "true") == 0 ||
+            strcmp(item->valuestring, "TRUE") == 0 ||
+            strcmp(item->valuestring, "1") == 0
+        );
+    }
+
+    return 0;
+}
+
 static const char *get_account_currency(cJSON *account) {
     cJSON *currency = cJSON_GetObjectItem(account, "currency");
     const char *value = json_string_value(currency);
@@ -294,28 +324,52 @@ static void process_fill_for_position(cJSON *fill, OpenLot *lots, int *lot_count
     }
 
     double price = parse_decimal_item(cJSON_GetObjectItem(fill, "price"));
-    double size = parse_decimal_item(cJSON_GetObjectItem(fill, "size"));
+    double raw_size = parse_decimal_item(cJSON_GetObjectItem(fill, "size"));
     double fee = parse_fill_fee_eur(fill);
+    int size_in_quote = json_bool_value(cJSON_GetObjectItem(fill, "size_in_quote"));
 
-    if (price <= 0.0 || size <= 0.0) {
+    /*
+     * Coinbase può restituire fill market BUY con size espresso in quote
+     * currency (EUR) invece che in base currency (BTC).
+     *
+     * Se trattiamo un size EUR come BTC, il cost basis esplode:
+     *   size=100 EUR, price=90000 EUR/BTC -> 9.000.000 EUR
+     *
+     * Quando size_in_quote è true convertiamo:
+     *   base_size = quote_size / price
+     *   gross_cost = quote_size
+     *
+     * Il fallback euristico copre vecchie/varianti di payload dove il flag non
+     * è presente ma il size è chiaramente troppo grande per essere BTC.
+     */
+    int looks_like_quote_size = (!size_in_quote && price > 1000.0 && raw_size > 1.0);
+
+    double base_size = (size_in_quote || looks_like_quote_size)
+        ? raw_size / price
+        : raw_size;
+
+    double gross_quote_value = (size_in_quote || looks_like_quote_size)
+        ? raw_size
+        : raw_size * price;
+
+    if (price <= 0.0 || raw_size <= 0.0 || base_size <= 0.0) {
         return;
     }
 
     summary->fill_count++;
 
     if (strcmp(side, "BUY") == 0) {
-        double gross_cost = size * price;
-        double real_cost = gross_cost + fee;
+        double real_cost = gross_quote_value + fee;
 
         if (*lot_count < 256) {
-            lots[*lot_count].btc = size;
+            lots[*lot_count].btc = base_size;
             lots[*lot_count].cost_eur = real_cost;
             (*lot_count)++;
         }
 
         summary->total_buy_fees_eur += fee;
     } else if (strcmp(side, "SELL") == 0) {
-        fifo_reduce_lots(lots, *lot_count, size);
+        fifo_reduce_lots(lots, *lot_count, base_size);
         summary->total_sell_fees_eur += fee;
     }
 }
@@ -504,6 +558,199 @@ CoinbasePositionSummary coinbase_get_btc_eur_position_summary_readonly(void) {
 
     return summary;
 }
+
+
+static void safe_copy_client(char *dst, size_t dst_size, const char *src) {
+    if (dst == NULL || dst_size == 0) {
+        return;
+    }
+
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    snprintf(dst, dst_size, "%s", src);
+}
+
+CoinbaseOrderStatus coinbase_get_order_status_readonly(const char *order_id) {
+    CoinbaseOrderStatus status;
+    memset(&status, 0, sizeof(status));
+
+    if (order_id == NULL || order_id[0] == '\0') {
+        safe_copy_client(status.message, sizeof(status.message), "Coinbase order status: order_id mancante");
+        return status;
+    }
+
+    CoinbaseCredentials credentials = env_load_coinbase_credentials();
+
+    if (!credentials.loaded) {
+        safe_copy_client(status.message, sizeof(status.message), "Coinbase order status: credenziali mancanti");
+        return status;
+    }
+
+    char path[256];
+    char url[512];
+
+    snprintf(
+        path,
+        sizeof(path),
+        "%s%s",
+        COINBASE_ORDER_STATUS_PATH_PREFIX,
+        order_id
+    );
+
+    snprintf(
+        url,
+        sizeof(url),
+        "%s%s",
+        COINBASE_ORDER_STATUS_URL_PREFIX,
+        path
+    );
+
+    char *jwt_token = coinbase_build_rest_jwt(
+        "GET",
+        path,
+        credentials.api_key,
+        credentials.api_secret
+    );
+
+    if (!jwt_token) {
+        safe_copy_client(status.message, sizeof(status.message), "Coinbase order status: JWT non generato");
+        return status;
+    }
+
+    CURL *curl = curl_easy_init();
+
+    if (!curl) {
+        free(jwt_token);
+        safe_copy_client(status.message, sizeof(status.message), "Coinbase order status: curl init fallita");
+        return status;
+    }
+
+    HttpResponse response;
+
+    if (!http_response_init(&response)) {
+        curl_easy_cleanup(curl);
+        free(jwt_token);
+        safe_copy_client(status.message, sizeof(status.message), "Coinbase order status: memoria risposta non disponibile");
+        return status;
+    }
+
+    struct curl_slist *headers = NULL;
+    char auth_header[4096];
+
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", jwt_token);
+
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Helix/0.2");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+
+    CURLcode result = curl_easy_perform(curl);
+
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    status.http_code = http_code;
+
+    if (result != CURLE_OK || http_code < 200 || http_code >= 300) {
+        snprintf(
+            status.message,
+            sizeof(status.message),
+            "Coinbase order status error: curl=%d http=%ld",
+            result,
+            http_code
+        );
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        http_response_free(&response);
+        free(jwt_token);
+        return status;
+    }
+
+    cJSON *json = cJSON_Parse(response.memory);
+
+    if (!json) {
+        safe_copy_client(status.message, sizeof(status.message), "Coinbase order status: JSON non valido");
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        http_response_free(&response);
+        free(jwt_token);
+        return status;
+    }
+
+    cJSON *order = cJSON_GetObjectItem(json, "order");
+
+    if (order && cJSON_IsObject(order)) {
+        status.connected = 1;
+        status.found = 1;
+
+        safe_copy_client(
+            status.order_id,
+            sizeof(status.order_id),
+            json_string_value(cJSON_GetObjectItem(order, "order_id"))
+        );
+
+        safe_copy_client(
+            status.product_id,
+            sizeof(status.product_id),
+            json_string_value(cJSON_GetObjectItem(order, "product_id"))
+        );
+
+        safe_copy_client(
+            status.side,
+            sizeof(status.side),
+            json_string_value(cJSON_GetObjectItem(order, "side"))
+        );
+
+        safe_copy_client(
+            status.status,
+            sizeof(status.status),
+            json_string_value(cJSON_GetObjectItem(order, "status"))
+        );
+
+        status.filled_size =
+            parse_decimal_item(cJSON_GetObjectItem(order, "filled_size"));
+
+        status.average_filled_price =
+            parse_decimal_item(cJSON_GetObjectItem(order, "average_filled_price"));
+
+        status.total_fees =
+            parse_decimal_item(cJSON_GetObjectItem(order, "total_fees"));
+
+        status.completion_percentage =
+            parse_decimal_item(cJSON_GetObjectItem(order, "completion_percentage"));
+
+        snprintf(
+            status.message,
+            sizeof(status.message),
+            "Coinbase order status OK: %s %.2f%%",
+            status.status[0] ? status.status : "UNKNOWN",
+            status.completion_percentage
+        );
+    } else {
+        status.connected = 1;
+        status.found = 0;
+        safe_copy_client(status.message, sizeof(status.message), "Coinbase order status: oggetto order mancante");
+    }
+
+    cJSON_Delete(json);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    http_response_free(&response);
+    free(jwt_token);
+
+    return status;
+}
+
 
 WalletInfo coinbase_get_wallet_info_readonly(void) {
     WalletInfo info = wallet_info_empty();
