@@ -2,15 +2,17 @@
 
 **Helix** is a C/GTK4 desktop application for studying and building a cautious BTC-EUR trading engine.
 
+It currently supports simulation, persistent local state, configurable strategy parameters, Coinbase read-only market data, Coinbase authenticated read-only wallet synchronization, Coinbase order preview, dry-run/live-candidate validation, and multiple safety gates.
+
 Current milestone:
 
 ```text
-v0.2.0-prelive
+v0.2.0-rc1
 ```
 
-Helix currently supports simulation, persistent local state, configurable strategy parameters, Coinbase read-only market data, Coinbase authenticated read-only wallet synchronization, Coinbase order preview, dry-run execution, pre-live reporting, and multiple safety layers.
+The normal build remains intentionally safe and does not execute real orders.
 
-Real trading is still intentionally blocked in the normal build.
+The separate live-candidate build has completed the first supervised micro-live milestone: one real BTC-EUR BUY was accepted by Coinbase, filled, reconciled, and followed by automatic stop after real order.
 
 ---
 
@@ -19,16 +21,13 @@ Real trading is still intentionally blocked in the normal build.
 Implemented:
 
 - GTK4 desktop dashboard
-- compact application menubar
-- separate dialogs for settings, Coinbase API, history, audit, reports and status tools
+- expandable UI sections for strategy and Coinbase API settings
 - SQLite persistence and state recovery
 - automatic engine loop
 - simulated BUY/SELL mode
 - trade history journal
-- configurable strategy and safety settings
+- configurable strategy settings
 - minimum liquidity guard
-- liquidity reserve protection
-- manual reserve slot release/lock
 - slot-based strategy model
 - Coinbase BTC-EUR public spot price
 - Coinbase authenticated read-only wallet sync
@@ -36,52 +35,40 @@ Implemented:
 - runtime modes:
   - `SIMULATION`
   - `LIVE_READONLY`
-  - `LIVE_TRADING` placeholder, still intentionally blocked
-- internal trade preview engine
-- fee-aware BUY/SELL preview calculations
-- estimated profit and break-even calculations
-- Coinbase fills reconstruction in read-only mode
+  - `LIVE_TRADING` live-candidate mode behind safety gates
 - Coinbase order preview integration
-- exchange-side safety gate
-- runtime safety layer
-- reconciliation engine
-- order state recovery
-- anti duplicate-order engine
-- persistent order journal
+- BUY preview/order sizing with `quote_size` in EUR
+- SELL sizing model with `base_size` in BTC
+- locale-safe decimal formatting for Coinbase JSON payloads
+- dry-run order executor
+- live-candidate real Coinbase create-order transport
 - final live gate
-- pre-live validation
-- API health checks
+- live execution lock
+- persistent order journal
+- risk guard
+- runtime safety layer
 - operational limits:
   - max orders per day
-  - cooldown between order attempts
-- risk guard:
-  - max daily loss guard
-  - drawdown guard
-- volatility protection
-- emergency stop / kill-switch
-- manual LIVE_TRADING arm/disarm flag
-- dry-run order executor
-- real Coinbase create-order transport implemented behind hard safety locks
-- live execution lock
-- post-order result journal support
-- post-order reconciliation placeholder
-- pre-live report dialog
-- pre-live report export
-- status snapshot export
-- engine audit journal
-- audit throttling and retention cleanup
-- engine audit hard cap at 5000 records
-- configurable audit retention days
-- GTK lifecycle/timer safety fixes
+  - order cooldown
+- anti duplicate-order engine
+- post-order reconciliation for controlled live candidate tests
+- micro-live settings:
+  - micro-live enabled flag
+  - micro-live max order in EUR
+  - micro-live accumulation consent
+  - stop after real order
+- first supervised real BTC-EUR BUY completed and reconciled in `v0.2.0-rc1`
 
 Not implemented yet:
 
-- enabling real Coinbase BUY/SELL execution in normal builds
-- final production-grade post-order reconciliation with live fills confirmation
-- long pre-live dry-run validation period
-- real-money rollout procedure
+- real Coinbase BUY/SELL orders in the normal build
+- continuous unattended live trading
+- full BUY -> SELL profit cycle validation
+- production-grade live SELL execution validation
+- long post-live dry-run validation period
+- dedicated paper/simulation executable that can never trade
+- advanced paper-trading analytics
 - background daemon/systemd mode
-- advanced backtesting/paper-trading analytics
 
 ---
 
@@ -89,34 +76,45 @@ Not implemented yet:
 
 Helix is **not financial advice**.
 
-The current code can read Coinbase wallet balances in read-only mode and can perform Coinbase order previews.
+The normal build can read Coinbase wallet balances in read-only mode and must remain safe for normal development.
 
-Real order creation code exists, but it is intentionally protected by multiple locks and is **not enabled by the normal Makefile build**.
+`LIVE_TRADING` is available only as a guarded live-candidate path in the dedicated `Makefile.live` build. It must not be used casually.
 
-`LIVE_TRADING` is present as a future runtime mode, but real execution remains blocked unless all of the following are explicitly satisfied in a future controlled build:
+As of `v0.2.0-rc1`, Helix has completed one supervised micro-live BUY with real money. This does **not** make Helix production-ready and does **not** mean unattended trading is safe.
 
-- runtime mode is `LIVE_TRADING`
-- manual LIVE_TRADING arm flag is enabled from the UI
-- emergency stop is disabled
-- reconciliation checks pass
-- order recovery checks pass
-- anti duplicate-order checks pass
-- risk guard checks pass
-- operational limits pass
-- volatility protection passes
-- Coinbase order preview succeeds
-- final live gate passes
-- pre-live validation passes
-- required `.env` safety flags are enabled
-- binary is compiled with the explicit real-order compile flag
+Before continuous real trading, Helix must support and validate:
 
-Before using Helix with real money, it must run for an extended period in:
+- strict safety layer
+- order preview
+- maximum order size
+- cooldown between orders
+- fee-aware calculations
+- persistent order journal
+- reconciliation between Coinbase and SQLite
+- emergency stop
+- strong error handling
+
+Implemented and validated in the `v0.2.0-rc1` micro-live milestone:
 
 ```text
-LIVE_READONLY + dry-run executor
+Coinbase preview OK
+Final live gate OK
+Live execution lock OK
+Real executor SENT
+Coinbase HTTP 200
+Order FILLED / Completato
+Post-order reconciliation OK
+Micro-live stop after real order
 ```
 
-and its audit/journal decisions must be reviewed carefully.
+Recommended current posture:
+
+```text
+Use normal build for daily development.
+Use Makefile.live only for explicit supervised micro-live tests.
+Keep stop-after-real-order enabled.
+Do not run continuous live trading yet.
+```
 
 ---
 
@@ -125,60 +123,28 @@ and its audit/journal decisions must be reviewed carefully.
 ```text
 helix/
 ├── Makefile
+├── Makefile.live
 ├── README.md
 ├── VERSION
 ├── .gitignore
-├── .env.example
-├── docs/
-│   └── checklist_prelive.md
 ├── src/
 │   ├── main.c
 │   ├── ui/
 │   │   ├── window.c
 │   │   └── window.h
 │   ├── engine/
-│   │   ├── anti_duplicate_order.c
-│   │   ├── anti_duplicate_order.h
-│   │   ├── api_health.c
-│   │   ├── api_health.h
 │   │   ├── bot_state.c
 │   │   ├── bot_state.h
-│   │   ├── emergency_stop.c
-│   │   ├── emergency_stop.h
 │   │   ├── engine.c
 │   │   ├── engine.h
-│   │   ├── exchange_safety.c
-│   │   ├── exchange_safety.h
 │   │   ├── final_live_gate.c
-│   │   ├── final_live_gate.h
-│   │   ├── liquidity_reserve.c
-│   │   ├── liquidity_reserve.h
 │   │   ├── live_execution_lock.c
-│   │   ├── live_execution_lock.h
-│   │   ├── live_readiness.c
-│   │   ├── live_readiness.h
 │   │   ├── operational_limits.c
-│   │   ├── operational_limits.h
 │   │   ├── order_journal.c
-│   │   ├── order_journal.h
-│   │   ├── order_state_recovery.c
-│   │   ├── order_state_recovery.h
-│   │   ├── post_order_reconciliation.c
-│   │   ├── post_order_reconciliation.h
-│   │   ├── prelive_validation.c
-│   │   ├── prelive_validation.h
-│   │   ├── reconciliation.c
-│   │   ├── reconciliation.h
 │   │   ├── risk_guard.c
-│   │   ├── risk_guard.h
 │   │   ├── runtime_safety.c
-│   │   ├── runtime_safety.h
 │   │   ├── settings.c
 │   │   ├── settings.h
-│   │   ├── trade_preview.c
-│   │   ├── trade_preview.h
-│   │   ├── volatility_protection.c
-│   │   ├── volatility_protection.h
 │   │   ├── wallet.c
 │   │   └── wallet.h
 │   ├── db/
@@ -212,76 +178,124 @@ helix/
 | Mode | Description |
 |---|---|
 | `SIMULATION` | Uses simulated price movement and virtual BUY/SELL operations |
-| `LIVE_READONLY` | Reads real Coinbase price, wallet balances, fills, and previews without trading |
-| `LIVE_TRADING` | Present but intentionally blocked by safety gates and build flags |
+| `LIVE_READONLY` | Reads real Coinbase price and real Coinbase EUR/BTC balances without trading |
+| `LIVE_TRADING` | Normal build stays blocked; live-candidate build can execute only if all gates pass |
 
 ---
 
-## Strategy and safety settings
+## Strategy settings
 
 The strategy can be configured from the GTK4 interface:
 
 - slot amount in EUR
 - buy drop percentage
 - sell profit percentage
-- estimated fee percentage
-- minimum profit in EUR
-- minimum profit percentage
 - minimum liquidity percentage
-- protected liquidity reserve percentage
-- manually released reserve slots
 - max slots
-- audit retention days
-- volatility window seconds
-- volatility maximum movement percentage
+- runtime mode
+- emergency stop / kill-switch
+- LIVE_TRADING arm/disarm
+- micro-live enabled flag
+- micro-live max order in EUR
+- micro-live accumulation consent
+- stop after real order
 - max orders per day
-- order cooldown seconds
+- cooldown between order attempts
 - max daily loss EUR
 - max drawdown percentage
-- runtime mode
-- emergency stop
-- LIVE_TRADING arm/disarm
+- protected liquidity reserve percentage
 
-Default values may evolve during development. Review them before running Helix for long sessions.
+Default values:
+
+```text
+slot amount EUR:       100.00
+buy drop percent:      2.00%
+sell profit percent:   1.50%
+minimum liquidity:     25.00%
+max slots:             6
+runtime mode:          SIMULATION
+
+Micro-live values used for the first real BUY milestone:
+
+slot amount EUR:       10.00
+micro-live max order:  10.00
+protected reserve:     80.00%
+max orders per day:    1
+cooldown:              900 seconds
+stop after real order: enabled
+```
 
 ---
 
-## Coinbase read-only and preview mode
+## Coinbase read-only mode
 
-In `LIVE_READONLY`, Helix uses Coinbase to read:
+In `LIVE_READONLY`, Helix uses Coinbase only to read:
 
 - BTC-EUR spot price
 - EUR balance
 - BTC balance
 - fills/order history when available
-- official Coinbase order preview
+- official Coinbase order preview when needed
 
-It does **not** place orders in normal builds.
+It does **not** place orders in the normal safe build.
 
-When Helix detects BTC and almost no EUR, it can model the state as a fully allocated BTC position:
+When Helix detects BTC and almost no EUR, it models the state as a fully allocated BTC position:
 
 ```text
 Slot used: max / max
 Mode: WAITING_SELL
 ```
 
-Sell decisions are expected to be fee-aware and should only be allowed when the estimated net sell value is above the position cost basis plus the configured minimum profit.
+Helix can reconstruct and reconcile parts of the position using Coinbase fills, but this area still needs more long-term validation before unattended trading.
 
 ---
 
-## Real execution status
+## Live-candidate execution status
 
-The real Coinbase order transport is implemented for future use, but it is intentionally disabled by default.
+The normal Makefile build remains safe.
 
-The normal Makefile does **not** enable:
-
-```text
-HELIX_ENABLE_REAL_COINBASE_ORDERS
+```bash
+make clean
+make run
 ```
 
-Even if future `.env` flags are enabled, real order execution remains blocked unless the application is intentionally compiled with the explicit real-order compile flag and all safety gates pass.
+The live-candidate build is explicit:
 
-Future real-trading `.env` flags are intentionally strict:
+```bash
+make -f Makefile.live clean
+make -f Makefile.live
+make -f Makefile.live run
+```
+
+The live-candidate build creates:
+
+```text
+./helix-live
+```
+
+Real execution in `helix-live` requires all of the following:
+
+```text
+Runtime = LIVE_TRADING
+LIVE_TRADING arm = enabled from UI
+Kill-switch = disabled
+Micro-live = enabled
+Micro-live accumulation = explicitly enabled when buying with an open BTC position
+Max order limit respected
+Max orders/day respected
+Cooldown respected
+Liquidity reserve respected
+Risk guard passed
+Runtime safety passed
+Exchange safety passed
+Final live gate passed
+Anti duplicate-order passed
+Live execution lock passed
+Coinbase preview valid
+.env real-trading flags enabled
+```
+
+The live `.env` flags are intentionally strict:
 
 ```env
 HELIX_REAL_TRADING_ENABLED=true
@@ -289,7 +303,98 @@ HELIX_ALLOW_COINBASE_ORDERS=true
 HELIX_I_UNDERSTAND_REAL_MONEY_RISK=true
 ```
 
-Do not enable these unless you are intentionally testing a controlled real-trading build.
+Do not enable these unless you are intentionally running a supervised live-candidate test.
+
+---
+
+## First real BUY milestone
+
+Milestone:
+
+```text
+v0.2.0-rc1
+```
+
+Helix completed one supervised real BUY:
+
+```text
+Market: BTC-EUR
+Type: Market
+Side: BUY
+Total: about 10 EUR
+Status: FILLED / Completato
+```
+
+Expected and observed flow:
+
+```text
+BUY uses quote_size in EUR
+Coinbase preview returned errs: []
+Final gate OK
+Real executor sent order
+Coinbase accepted order
+Post-order reconciliation OK
+Micro-live stop after real order
+Bot stopped automatically
+```
+
+This validates the guarded micro-live BUY path. It does **not** validate continuous automatic trading yet.
+
+---
+
+## Coinbase order sizing
+
+Helix must build Coinbase orders according to the side:
+
+```text
+BUY  -> quote_size in EUR
+SELL -> base_size in BTC
+```
+
+Example BUY request:
+
+```json
+{
+  "product_id": "BTC-EUR",
+  "side": "BUY",
+  "order_configuration": {
+    "market_market_ioc": {
+      "quote_size": "10.00",
+      "rfq_disabled": true
+    }
+  }
+}
+```
+
+Example meaning:
+
+```text
+BUY 10 EUR of BTC
+Coinbase receives quote_size = "10.00"
+Coinbase calculates base_size BTC
+```
+
+For SELL:
+
+```text
+Sell BTC quantity
+Coinbase receives base_size
+Coinbase calculates EUR received
+```
+
+Coinbase JSON payloads must use decimal dots:
+
+```text
+10.00
+0.00015346
+```
+
+not Italian locale commas:
+
+```text
+10,00
+0,00015346
+```
 
 ---
 
@@ -308,10 +413,20 @@ Use a Coinbase/CDP key with:
 
 ```text
 Algorithm: ECDSA
-Permissions: View only
+Permissions for normal testing: View only
+Permissions for supervised live-candidate: View + Trade
 ```
 
-Do **not** enable trading, transfer, or withdrawal permissions until the project is intentionally moved to a controlled real-trading branch.
+Recommended live-candidate key:
+
+```text
+[✓] View
+[✓] Trade
+[ ] Transfer
+[ ] Receive
+```
+
+Do **not** enable transfer or withdrawal permissions.
 
 Never commit `.env`.
 
@@ -327,113 +442,44 @@ sudo apt install build-essential libgtk-4-dev pkg-config libsqlite3-dev libcurl4
 
 ---
 
-## Build and run
-
-Helix has two build modes.
+## Build
 
 ### Normal safe build
-
-Use this for daily development, simulation, read-only Coinbase checks and dry-run validation.
 
 ```bash
 make clean
 make run
 ```
 
-This uses:
-
-```text
-Makefile
-```
-
-It creates and runs:
+This builds and runs:
 
 ```text
 ./helix
 ```
 
-The normal build is intentionally safe and does **not** enable real Coinbase order execution.
-
-You can also run the commands separately:
-
-```bash
-make clean
-make
-./helix
-```
-
----
+Use this for normal development, simulation, read-only Coinbase checks and dry-run validation.
 
 ### Live-candidate build
-
-Use this only for controlled live-candidate tests.
 
 ```bash
 make -f Makefile.live clean
 make -f Makefile.live
+make -f Makefile.live run
 ```
 
-This uses:
-
-```text
-Makefile.live
-```
-
-It creates:
+This builds and runs:
 
 ```text
 ./helix-live
 ```
 
-To run it:
-
-```bash
-make -f Makefile.live run
-```
-
-The live-candidate build compiles with:
-
-```text
--DHELIX_ENABLE_REAL_COINBASE_ORDERS
-```
-
-Even in this build, real order execution remains blocked unless all runtime safety gates, `.env` flags, micro-live settings and manual arm checks pass.
-
-Do **not** use `Makefile.live` for normal development.
-
----
+Use this only for explicit supervised live-candidate tests.
 
 ### Quick reminder
 
 ```text
 make run                    -> safe normal build, runs ./helix
 make -f Makefile.live run   -> live-candidate build, runs ./helix-live
-```
-
----
-
-
-## Pre-live validation workflow
-
-Use this workflow before considering any real-money test:
-
-1. Start Helix in `SIMULATION`.
-2. Verify that dashboard, menus, reports and exports work.
-3. Switch to `LIVE_READONLY`.
-4. Confirm that Coinbase price and wallet balances are read correctly.
-5. Keep `LIVE_TRADING` disabled.
-6. Let Helix run with dry-run execution.
-7. Open `Visualizza -> Report pre-live`.
-8. Export `data/prelive_report.txt`.
-9. Export `data/status_snapshot.txt`.
-10. Review audit and journal decisions.
-11. Continue until at least 20 valid dry-runs are recorded in the last 7 days.
-12. Only then consider a separate `live-candidate` branch.
-
-Detailed checklist:
-
-```text
-docs/checklist_prelive.md
 ```
 
 ---
@@ -446,8 +492,9 @@ Do not commit:
 - local SQLite databases
 - SQLite WAL/SHM files
 - Coinbase debug JSON/log files
-- generated local reports
+- generated reports/snapshots
 - compiled binary
+- `helix-live`
 - local archives
 - files containing personal financial history
 
@@ -455,6 +502,7 @@ Useful cleanup before push:
 
 ```bash
 rm -f helix
+rm -f helix-live
 rm -f data/*.json
 rm -f data/*.log
 rm -f data/*.txt
@@ -463,16 +511,58 @@ rm -f data/*.db-wal
 git status
 ```
 
-If something sensitive was accidentally staged:
-
-```bash
-git restore --staged <file>
-```
-
 If something sensitive was already tracked:
 
 ```bash
-git rm --cached <file>
+git rm --cached .env
+git rm --cached data/coinbase_accounts_raw.json
+git rm --cached data/coinbase_accounts_summary.log
+```
+
+---
+
+## Local DB and cleanup
+
+The active database is:
+
+```text
+data/helix.db
+```
+
+Do not delete it if you want to preserve Helix state, settings and journal.
+
+Useful backup:
+
+```bash
+cp data/helix.db data/helix_after_first_real_buy.db
+```
+
+Do not commit `data/`.
+
+If the local DB contains test noise, use a dedicated cleanup script only after making a backup:
+
+```bash
+cp data/helix.db data/helix_before_cleanup.db
+sqlite3 data/helix.db < docs/cleanup_live_candidate_noise.sql
+```
+
+---
+
+## Suggested commit message
+
+```text
+feat: complete guarded micro-live buy execution path
+
+- Add guarded live-candidate BUY path
+- Use quote_size for BUY and base_size for SELL
+- Add locale-safe Coinbase order formatting
+- Add micro-live accumulation consent
+- Add live execution lock and final gate flow
+- Fix operational limits to count real orders only
+- Fix anti-duplicate behavior for live path
+- Add post-order reconciliation for first live BUY
+- Keep normal build safe
+- Document first real BUY milestone
 ```
 
 ---
@@ -481,16 +571,20 @@ git rm --cached <file>
 
 Next steps:
 
-1. run extended `LIVE_READONLY + dry-run` validation
-2. review order journal and engine audit decisions
-3. improve post-order reconciliation with real fills confirmation
-4. add stronger reporting for readiness and risk state
-5. add optional paper-trading analytics
-6. add backtesting support
-7. split GTK UI into smaller files
-8. add daemon/systemd runtime mode
-9. prepare a separate controlled branch for real-order testing
-10. only then evaluate whether to enable a real trading build
+1. verify state after restart following the first real order
+2. review Coinbase order, local journal and reconciliation data
+3. improve report clarity for real-order lifecycle
+4. add a separate paper/simulation executable that can never trade
+5. add automated tests around engine decisions and safety gates
+6. study and document the engine flow module by module
+7. validate the complete cycle BUY -> hold -> SELL profitably
+8. improve post-order reconciliation with broader live-fill edge cases
+9. introduce controlled `micro-live continuous` mode
+10. only later evaluate disabling stop-after-real-order for supervised tests
+11. add optional paper trading with live data
+12. add backtesting support
+13. split GTK UI into smaller files
+14. add systemd/background runtime mode
 
 ---
 
@@ -499,14 +593,17 @@ Next steps:
 Current milestone:
 
 ```text
-v0.2.0-prelive
+v0.2.0-rc1
 ```
 
 Suggested tag:
 
 ```bash
-git tag -a v0.2.0-prelive -m "v0.2.0-prelive"
+git tag -a v0.2.0-rc1 -m "Micro-live candidate: first real BUY executed and reconciled"
+git push origin v0.2.0-rc1
 ```
+
+`v0.2.0-rc1` means release candidate / milestone, not stable unattended trading.
 
 ---
 
