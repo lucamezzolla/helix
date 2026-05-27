@@ -422,6 +422,70 @@ static void record_blocked_preview_candidate(
     );
 }
 
+static void record_buy_candidate_blocked_by_open_position(
+    BotState *state,
+    StrategySettings *settings,
+    time_t now
+) {
+    OrderExecutionPlan plan;
+    char reason[256];
+
+    if (state == NULL || settings == NULL) {
+        return;
+    }
+
+    if (settings->slot_amount_eur <= 0.0) {
+        return;
+    }
+
+    if (state->eur_balance < settings->slot_amount_eur) {
+        return;
+    }
+
+    if (state->used_slots >= state->max_slots) {
+        return;
+    }
+
+    memset(&plan, 0, sizeof(plan));
+    plan.dry_run = 1;
+    plan.allowed = 0;
+    plan.side = ORDER_EXECUTOR_SIDE_BUY;
+    snprintf(plan.product_id, sizeof(plan.product_id), "%s", "BTC-EUR");
+    snprintf(
+        plan.client_order_id,
+        sizeof(plan.client_order_id),
+        "helix-dryrun-buy-blocked-%ld",
+        (long)now
+    );
+
+    plan.requested_quote_size = settings->slot_amount_eur;
+    plan.preview_total_eur = settings->slot_amount_eur;
+    plan.preview_fee_eur = settings->slot_amount_eur * estimate_fee_rate(settings);
+    if (state->current_price > 0.0) {
+        double net_quote = settings->slot_amount_eur - plan.preview_fee_eur;
+        if (net_quote > 0.0) {
+            plan.preview_base_size = net_quote / state->current_price;
+        }
+        plan.preview_avg_price = state->current_price;
+    }
+
+    snprintf(
+        reason,
+        sizeof(reason),
+        "BUY candidate bloccato | posizione BTC aperta: engine in priorita WAITING_SELL | EUR %.2f | slot %.2f | slot usati %d/%d",
+        state->eur_balance,
+        settings->slot_amount_eur,
+        state->used_slots,
+        state->max_slots
+    );
+
+    record_blocked_preview_candidate(
+        plan,
+        "BUY_CANDIDATE_BLOCKED",
+        reason
+    );
+}
+
 static void audit_coinbase_order_preview_if_needed(
     BotState *state,
     StrategySettings *settings
@@ -501,6 +565,8 @@ static void audit_coinbase_order_preview_if_needed(
                 );
             }
         }
+
+        record_buy_candidate_blocked_by_open_position(state, settings, now);
 
         return;
     }
@@ -884,7 +950,78 @@ void helix_engine_tick(BotState *state) {
     }
 
     if (settings.runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
-        RuntimeSafetyCheck live_safety = runtime_safety_check_live_trading_arm(&settings);
+        RuntimeSafetyCheck live_safety;
+        WalletInfo remote_wallet =
+            coinbase_get_wallet_info_readonly();
+
+        CoinbasePositionSummary position_summary =
+            coinbase_get_btc_eur_position_summary_readonly();
+
+        if (remote_wallet.connected) {
+            ReconciliationReport reconciliation;
+
+            sync_state_from_remote_wallet(state, &remote_wallet, &position_summary);
+
+            audit_engine_decision(
+                "LIVE_TRADING",
+                "READONLY_SYNC",
+                state->last_trade,
+                state->current_price,
+                state->btc_balance,
+                state->eur_balance,
+                0.0,
+                0.0
+            );
+
+            reconciliation = reconciliation_check_live_readonly(
+                state,
+                &remote_wallet,
+                &position_summary
+            );
+            audit_reconciliation_report(reconciliation, state);
+
+            if (reconciliation.status == RECONCILIATION_STATUS_BLOCKED) {
+                state->mode = BOT_MODE_ERROR;
+                snprintf(
+                    state->last_trade,
+                    sizeof(state->last_trade),
+                    "%.120s",
+                    reconciliation.reason
+                );
+                return;
+            }
+
+            /*
+             * In live-candidate mode we still want read-only previews and
+             * candidate journal records before the real executor gate.
+             * This does not send orders: it only records what Helix would
+             * consider and why it is blocked.
+             */
+            audit_coinbase_order_preview_if_needed(state, &settings);
+        } else {
+            state->mode = BOT_MODE_ERROR;
+
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "LIVE_TRADING errore: wallet remoto non connesso"
+            );
+
+            audit_engine_decision(
+                "LIVE_TRADING",
+                "READONLY_SYNC_ERROR",
+                state->last_trade,
+                state->current_price,
+                state->btc_balance,
+                state->eur_balance,
+                0.0,
+                0.0
+            );
+
+            return;
+        }
+
+        live_safety = runtime_safety_check_live_trading_arm(&settings);
 
         state->mode = BOT_MODE_ERROR;
         audit_runtime_safety_block("LIVE_TRADING", live_safety, state);
