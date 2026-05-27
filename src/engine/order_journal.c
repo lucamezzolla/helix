@@ -105,7 +105,29 @@ int order_journal_record_execution_plan(
     sqlite3_bind_text(stmt, 2, side_to_string(plan->side), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, plan->product_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 4, plan->dry_run ? 1 : 0);
-    sqlite3_bind_text(stmt, 5, plan->allowed ? "DRY_RUN_READY" : "DRY_RUN_BLOCKED", -1, SQLITE_TRANSIENT);
+
+    {
+        const char *status;
+
+        if (plan->dry_run) {
+            status = plan->allowed ? "DRY_RUN_READY" : "DRY_RUN_BLOCKED";
+        } else if (
+            (decision && strstr(decision, "BLOCK") != NULL) ||
+            !plan->allowed
+        ) {
+            status = "REAL_BLOCKED";
+        } else {
+            /*
+             * A live plan that reached PRE_EXECUTION/FINAL_GATE_OK is not a
+             * dry-run. It is only a real candidate until order_executor writes
+             * REAL_SENT / REAL_REJECTED / REAL_BLOCKED.
+             */
+            status = "REAL_PLAN_READY";
+        }
+
+        sqlite3_bind_text(stmt, 5, status, -1, SQLITE_TRANSIENT);
+    }
+
     sqlite3_bind_text(stmt, 6, phase ? phase : "PRE_EXECUTION", -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 7, decision ? decision : "UNKNOWN", -1, SQLITE_TRANSIENT);
     sqlite3_bind_double(stmt, 8, plan->requested_quote_size);
@@ -511,19 +533,19 @@ int order_journal_get_prelive_report(PreliveReport *report) {
         count_order_journal_matches("status = 'REAL_SENT'");
 
     report->final_gate_ok_last_7_days =
-        count_order_journal_matches("decision = 'FINAL_GATE_OK' OR phase = 'FINAL_GATE_OK'");
+        count_order_journal_matches("dry_run = 0 AND (decision = 'FINAL_GATE_OK' OR phase = 'FINAL_GATE_OK')");
 
     report->final_gate_blocked_last_7_days =
-        count_order_journal_matches("decision = 'FINAL_GATE_BLOCKED' OR phase = 'FINAL_GATE_BLOCKED'");
+        count_order_journal_matches("dry_run = 0 AND (decision = 'FINAL_GATE_BLOCKED' OR phase = 'FINAL_GATE_BLOCKED')");
 
     report->real_executor_blocked_last_7_days =
         count_order_journal_matches("status = 'REAL_BLOCKED' OR execution_decision = 'BLOCKED'");
 
     report->post_order_recon_ok_last_7_days =
-        count_order_journal_matches("decision = 'POST_ORDER_RECON_OK' OR phase = 'POST_ORDER_RECON_OK'");
+        count_order_journal_matches("dry_run = 0 AND (decision = 'POST_ORDER_RECON_OK' OR phase = 'POST_ORDER_RECON_OK')");
 
     report->post_order_recon_blocked_last_7_days =
-        count_order_journal_matches("decision = 'POST_ORDER_RECON_BLOCKED' OR phase = 'POST_ORDER_RECON_BLOCKED'");
+        count_order_journal_matches("dry_run = 0 AND (decision = 'POST_ORDER_RECON_BLOCKED' OR phase = 'POST_ORDER_RECON_BLOCKED')");
 
     load_last_order_journal_block(report);
     load_last_order_journal_entry(report);

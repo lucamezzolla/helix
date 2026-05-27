@@ -73,16 +73,23 @@ static int ensure_order_journal_exists(sqlite3 *db) {
     return 1;
 }
 
-static int count_orders_today(sqlite3 *db) {
+static int count_real_orders_today(sqlite3 *db) {
     sqlite3_stmt *stmt;
     int count = 0;
 
+    /*
+     * Operational limits must count only orders that actually reached
+     * Coinbase. Dry-run FINAL_GATE_OK/DRY_RUN_READY entries are diagnostics
+     * and must never consume the daily real-order allowance.
+     */
     const char *sql =
-        "SELECT COUNT(*) "
+        "SELECT COUNT(DISTINCT client_order_id) "
         "FROM order_journal "
         "WHERE date(created_at) = date('now', 'localtime') "
-        "AND phase IN ('PRE_EXECUTION', 'FINAL_GATE_OK', 'REAL_EXECUTION') "
-        "AND decision NOT LIKE '%BLOCKED%';";
+        "  AND dry_run = 0 "
+        "  AND status = 'REAL_SENT' "
+        "  AND phase = 'REAL_EXECUTION' "
+        "  AND COALESCE(coinbase_order_id, '') <> '';";
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         return 0;
@@ -96,18 +103,24 @@ static int count_orders_today(sqlite3 *db) {
     return count;
 }
 
-static int seconds_since_last_order(sqlite3 *db) {
+static int seconds_since_last_real_order(sqlite3 *db) {
     sqlite3_stmt *stmt;
     int seconds = 999999;
 
+    /*
+     * Cooldown applies to real Coinbase submissions only.
+     * Preview/dry-run diagnostics must not keep the bot artificially blocked.
+     */
     const char *sql =
         "SELECT CAST((julianday('now') - julianday(MAX(created_at))) * 86400 AS INTEGER) "
         "FROM order_journal "
-        "WHERE phase IN ('PRE_EXECUTION', 'FINAL_GATE_OK', 'REAL_EXECUTION') "
-        "AND decision NOT LIKE '%BLOCKED%';";
+        "WHERE dry_run = 0 "
+        "  AND status = 'REAL_SENT' "
+        "  AND phase = 'REAL_EXECUTION' "
+        "  AND COALESCE(coinbase_order_id, '') <> '';";
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        return seconds;
+        return 999999;
     }
 
     if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL) {
@@ -148,8 +161,8 @@ OperationalLimitCheck operational_limits_check(
         return make_check(0, "BLOCKED", "Operational limits: order_journal non disponibile", 0, 0);
     }
 
-    orders_today = count_orders_today(db);
-    elapsed = seconds_since_last_order(db);
+    orders_today = count_real_orders_today(db);
+    elapsed = seconds_since_last_real_order(db);
 
     sqlite3_close(db);
 
@@ -157,7 +170,7 @@ OperationalLimitCheck operational_limits_check(
         snprintf(
             reason,
             sizeof(reason),
-            "Operational limits %s: limite ordini giornalieri raggiunto %d/%d",
+            "Operational limits %s: limite ordini reali giornalieri raggiunto %d/%d",
             side_to_string(side),
             orders_today,
             settings->max_orders_per_day

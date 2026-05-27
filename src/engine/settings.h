@@ -30,6 +30,7 @@ typedef struct {
     int micro_live_enabled;
     double micro_live_max_order_eur;
     int micro_live_stop_after_real_order;
+    int micro_live_allow_accumulation;
     RuntimeMode runtime_mode;
 } StrategySettings;
 

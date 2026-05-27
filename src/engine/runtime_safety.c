@@ -39,6 +39,118 @@ static double wallet_total_value_eur(const BotState *state) {
     return state->eur_balance + btc_value;
 }
 
+static int is_micro_live_accumulation_buy(
+    const BotState *state,
+    const StrategySettings *settings,
+    double eur_amount
+) {
+    if (state == NULL || settings == NULL) {
+        return 0;
+    }
+
+    if (settings->runtime_mode != RUNTIME_MODE_LIVE_TRADING) {
+        return 0;
+    }
+
+    if (!settings->micro_live_enabled || !settings->micro_live_allow_accumulation) {
+        return 0;
+    }
+
+    if (!settings->micro_live_stop_after_real_order) {
+        return 0;
+    }
+
+    if (settings->micro_live_max_order_eur <= 0.0 || settings->micro_live_max_order_eur > 50.0) {
+        return 0;
+    }
+
+    if (settings->slot_amount_eur <= 0.0 || settings->slot_amount_eur > settings->micro_live_max_order_eur) {
+        return 0;
+    }
+
+    if (eur_amount <= 0.0 || eur_amount > settings->micro_live_max_order_eur) {
+        return 0;
+    }
+
+    if (eur_amount > settings->slot_amount_eur) {
+        return 0;
+    }
+
+    if (settings->max_orders_per_day != 1) {
+        return 0;
+    }
+
+    if (settings->order_cooldown_seconds < 900) {
+        return 0;
+    }
+
+    if (settings->liquidity_reserve_percent < 80.0 || settings->liquidity_reserve_percent > 95.0) {
+        return 0;
+    }
+
+    if (state->btc_balance <= 0.0) {
+        return 0;
+    }
+
+    if (state->used_slots < 0 || state->used_slots >= settings->max_slots) {
+        return 0;
+    }
+
+    if (state->eur_balance < eur_amount) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static RuntimeSafetyCheck check_micro_live_accumulation_liquidity_after_buy(
+    const BotState *state,
+    const StrategySettings *settings,
+    double eur_amount
+) {
+    double eur_after_buy;
+    double protected_eur;
+
+    if (!is_micro_live_accumulation_buy(state, settings, eur_amount)) {
+        return make_check(
+            0,
+            "BLOCKED",
+            "Safety micro-live BUY: condizioni accumulo non valide"
+        );
+    }
+
+    eur_after_buy = state->eur_balance - eur_amount;
+    protected_eur = state->eur_balance * (settings->liquidity_reserve_percent / 100.0);
+
+    if (!isfinite(eur_after_buy) || !isfinite(protected_eur) || eur_after_buy < 0.0) {
+        return make_check(
+            0,
+            "BLOCKED",
+            "Safety micro-live BUY: calcolo riserva non valido"
+        );
+    }
+
+    if (eur_after_buy + 0.000001 < protected_eur) {
+        char reason[192];
+
+        snprintf(
+            reason,
+            sizeof(reason),
+            "Safety micro-live BUY: riserva protetta non rispettata | dopo BUY %.2f EUR | richiesta %.2f EUR",
+            eur_after_buy,
+            protected_eur
+        );
+
+        return make_check(0, "BLOCKED", reason);
+    }
+
+    return make_check(
+        1,
+        "ALLOWED",
+        "Safety micro-live BUY: riserva protetta rispettata, controllo liquidità globale bypassato in modo limitato"
+    );
+}
+
 static RuntimeSafetyCheck check_min_liquidity_after_buy(
     const BotState *state,
     const StrategySettings *settings,
@@ -98,7 +210,13 @@ static RuntimeSafetyCheck check_common_state(
     }
 
     if (settings->runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
-        return make_check(0, "BLOCKED", "Safety runtime: LIVE_TRADING ancora bloccato");
+#ifndef HELIX_ENABLE_REAL_COINBASE_ORDERS
+        return make_check(0, "BLOCKED", "Safety runtime: LIVE_TRADING bloccato nella build normale");
+#else
+        if (!settings->live_trading_armed) {
+            return make_check(0, "BLOCKED", "Safety runtime: LIVE_TRADING non armato manualmente");
+        }
+#endif
     }
 
     if (settings->max_slots <= 0) {
@@ -133,6 +251,21 @@ RuntimeSafetyCheck runtime_safety_check_buy(
 
     if (state->used_slots >= settings->max_slots) {
         return make_check(0, "BLOCKED", "Safety BUY: max_slots raggiunto");
+    }
+
+    if (is_micro_live_accumulation_buy(state, settings, eur_amount)) {
+        RuntimeSafetyCheck micro_liquidity =
+            check_micro_live_accumulation_liquidity_after_buy(
+                state,
+                settings,
+                eur_amount
+            );
+
+        if (!micro_liquidity.allowed) {
+            return micro_liquidity;
+        }
+
+        return micro_liquidity;
     }
 
     RuntimeSafetyCheck min_liquidity = check_min_liquidity_after_buy(
@@ -219,9 +352,17 @@ RuntimeSafetyCheck runtime_safety_check_live_trading_arm(
         );
     }
 
+#ifndef HELIX_ENABLE_REAL_COINBASE_ORDERS
     return make_check(
         0,
         "BLOCKED",
-        "Safety arm: LIVE_TRADING armato manualmente, ma invio ordini reali ancora non implementato"
+        "Safety arm: build normale senza HELIX_ENABLE_REAL_COINBASE_ORDERS"
     );
+#else
+    return make_check(
+        1,
+        "ALLOWED",
+        "Safety arm: LIVE_TRADING armato in build live"
+    );
+#endif
 }

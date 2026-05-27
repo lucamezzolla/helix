@@ -169,6 +169,16 @@ LiveExecutionLockResult live_execution_lock_check(
         return result;
     }
 
+    if (plan->side == ORDER_EXECUTOR_SIDE_BUY && !settings->micro_live_allow_accumulation) {
+        live_lock_set(
+            &result,
+            0,
+            "BLOCKED",
+            "LIVE_EXECUTION_LOCK BUY accumulation with open BTC position is not explicitly allowed"
+        );
+        return result;
+    }
+
     if (!env_load_bool_flag("HELIX_REAL_TRADING_ENABLED", 0)) {
         live_lock_set(
             &result,

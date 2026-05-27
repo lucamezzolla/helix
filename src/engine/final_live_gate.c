@@ -45,8 +45,15 @@ FinalLiveGateCheck final_live_gate_check_dry_run(
     }
 
     if (!plan->dry_run) {
-        set_result(&check, 0, "BLOCKED", "FINAL_LIVE_GATE_BLOCKED real order execution disabled");
+#ifndef HELIX_ENABLE_REAL_COINBASE_ORDERS
+        set_result(&check, 0, "BLOCKED", "FINAL_LIVE_GATE_BLOCKED real order execution disabled in normal build");
         return check;
+#else
+        if (settings->runtime_mode != RUNTIME_MODE_LIVE_TRADING) {
+            set_result(&check, 0, "BLOCKED", "FINAL_LIVE_GATE_BLOCKED real order outside LIVE_TRADING");
+            return check;
+        }
+#endif
     }
 
     if (plan->product_id[0] == '\0') {
@@ -62,15 +69,17 @@ FinalLiveGateCheck final_live_gate_check_dry_run(
     if (settings->runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
         RuntimeSafetyCheck live_safety = runtime_safety_check_live_trading_arm(settings);
 
-        snprintf(
-            check.reason,
-            sizeof(check.reason),
-            "FINAL_LIVE_GATE_BLOCKED LIVE_TRADING still blocked | %.160s",
-            live_safety.reason
-        );
-        snprintf(check.decision, sizeof(check.decision), "%s", "BLOCKED");
-        check.allowed = 0;
-        return check;
+        if (!live_safety.allowed) {
+            snprintf(
+                check.reason,
+                sizeof(check.reason),
+                "FINAL_LIVE_GATE_BLOCKED LIVE_TRADING not allowed | %.160s",
+                live_safety.reason
+            );
+            snprintf(check.decision, sizeof(check.decision), "%s", "BLOCKED");
+            check.allowed = 0;
+            return check;
+        }
     }
 
     if (plan->side == ORDER_EXECUTOR_SIDE_BUY) {
@@ -108,6 +117,10 @@ FinalLiveGateCheck final_live_gate_check_dry_run(
         return check;
     }
 
-    set_result(&check, 1, "ALLOWED_DRY_RUN", "FINAL_LIVE_GATE_OK dry-run order path allowed");
+    if (plan->dry_run) {
+        set_result(&check, 1, "ALLOWED_DRY_RUN", "FINAL_LIVE_GATE_OK dry-run order path allowed");
+    } else {
+        set_result(&check, 1, "ALLOWED_LIVE", "FINAL_LIVE_GATE_OK live order path allowed");
+    }
     return check;
 }

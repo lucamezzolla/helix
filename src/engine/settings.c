@@ -53,6 +53,7 @@ static double parse_double_setting(const char *value, double fallback) {
 #define KEY_MICRO_LIVE_ENABLED "micro_live.enabled"
 #define KEY_MICRO_LIVE_MAX_ORDER_EUR "micro_live.max_order_eur"
 #define KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER "micro_live.stop_after_real_order"
+#define KEY_MICRO_LIVE_ALLOW_ACCUMULATION "micro_live.allow_accumulation"
 #define KEY_RUNTIME_MODE "runtime.mode"
 
 static double get_double_setting(const char *key, double fallback) {
@@ -157,6 +158,7 @@ StrategySettings settings_default(void) {
     settings.micro_live_enabled = 0;
     settings.micro_live_max_order_eur = 20.0;
     settings.micro_live_stop_after_real_order = 1;
+    settings.micro_live_allow_accumulation = 0;
     settings.runtime_mode = RUNTIME_MODE_SIMULATION;
 
     return settings;
@@ -185,6 +187,7 @@ void settings_save(StrategySettings *settings) {
     set_int_setting(KEY_MICRO_LIVE_ENABLED, settings->micro_live_enabled ? 1 : 0);
     set_double_setting(KEY_MICRO_LIVE_MAX_ORDER_EUR, settings->micro_live_max_order_eur);
     set_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, settings->micro_live_stop_after_real_order ? 1 : 0);
+    set_int_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, settings->micro_live_allow_accumulation ? 1 : 0);
     set_runtime_mode_setting(settings->runtime_mode);
 }
 
@@ -278,6 +281,10 @@ void settings_save_defaults_if_missing(void) {
 
     if (!db_get_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, buffer, sizeof(buffer))) {
         set_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, defaults.micro_live_stop_after_real_order);
+    }
+
+    if (!db_get_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, defaults.micro_live_allow_accumulation);
     }
 
     if (!db_get_setting(KEY_RUNTIME_MODE, buffer, sizeof(buffer))) {
@@ -398,6 +405,9 @@ StrategySettings settings_load(void) {
 
     settings.micro_live_stop_after_real_order =
         get_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, defaults.micro_live_stop_after_real_order) ? 1 : 0;
+
+    settings.micro_live_allow_accumulation =
+        get_int_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, defaults.micro_live_allow_accumulation) ? 1 : 0;
 
     if (settings.micro_live_max_order_eur <= 0.0 || settings.micro_live_max_order_eur > 50.0) {
         settings.micro_live_max_order_eur = defaults.micro_live_max_order_eur;

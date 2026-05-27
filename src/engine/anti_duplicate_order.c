@@ -80,6 +80,22 @@ AntiDuplicateOrderCheck anti_duplicate_order_check_plan(
         return check;
     }
 
+    /*
+     * Dry-run/preview plans are diagnostics. They must not consume the
+     * anti-duplicate runtime signature used for live orders, otherwise the
+     * real path can be blocked by its own successful preview.
+     */
+    if (plan->dry_run) {
+        snprintf(
+            check.reason,
+            sizeof(check.reason),
+            "ANTI_DUPLICATE_ORDER_OK dry-run diagnostic plan not tracked"
+        );
+        snprintf(check.decision, sizeof(check.decision), "%s", "ALLOWED_DRY_RUN");
+        check.allowed = 1;
+        return check;
+    }
+
     memset(&active_order, 0, sizeof(active_order));
     if (db_get_active_order_state(&active_order) && !active_order.dry_run) {
         snprintf(
@@ -113,7 +129,7 @@ AntiDuplicateOrderCheck anti_duplicate_order_check_plan(
         snprintf(
             check.reason,
             sizeof(check.reason),
-            "ANTI_DUPLICATE_ORDER_BLOCKED duplicate dry-run plan inside cooldown %d sec",
+            "ANTI_DUPLICATE_ORDER_BLOCKED duplicate real plan inside cooldown %d sec",
             cooldown_seconds
         );
         snprintf(check.decision, sizeof(check.decision), "%s", "BLOCKED");

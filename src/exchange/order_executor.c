@@ -399,6 +399,36 @@ static void result_copy_json_string(
     snprintf(dest, dest_size, "%s", value);
 }
 
+
+static void format_decimal_dot(
+    char *buffer,
+    size_t buffer_size,
+    double value,
+    int decimals
+) {
+    size_t i;
+
+    if (buffer == NULL || buffer_size == 0) {
+        return;
+    }
+
+    if (decimals <= 2) {
+        snprintf(buffer, buffer_size, "%.2f", value);
+    } else {
+        snprintf(buffer, buffer_size, "%.8f", value);
+    }
+
+    /*
+     * snprintf segue LC_NUMERIC: in ambiente italiano potrebbe produrre
+     * "10,00". Coinbase vuole sempre decimali con punto nelle stringhe JSON.
+     */
+    for (i = 0; buffer[i] != '\0'; ++i) {
+        if (buffer[i] == ',') {
+            buffer[i] = '.';
+        }
+    }
+}
+
 static void build_market_ioc_order_body(
     char *buffer,
     size_t buffer_size,
@@ -411,7 +441,12 @@ static void build_market_ioc_order_body(
         plan->requested_quote_size :
         plan->requested_base_size;
 
-    snprintf(amount_text, sizeof(amount_text), "%.8f", amount);
+    format_decimal_dot(
+        amount_text,
+        sizeof(amount_text),
+        amount,
+        plan->side == ORDER_EXECUTOR_SIDE_BUY ? 2 : 8
+    );
 
     if (plan->preview_id[0] != '\0') {
         snprintf(

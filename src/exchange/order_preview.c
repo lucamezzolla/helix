@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define COINBASE_ORDER_PREVIEW_URL \
     "https://api.coinbase.com/api/v3/brokerage/orders/preview"
@@ -167,6 +169,173 @@ static void preview_set_message(
     );
 }
 
+static void save_buy_preview_debug_response(const char *response_body) {
+    FILE *file;
+
+    if (response_body == NULL || response_body[0] == '\0') {
+        return;
+    }
+
+    /*
+     * Debug locale intenzionale.
+     * Il file e' sotto data/ e non deve essere committato.
+     * Serve per leggere il motivo reale restituito da Coinbase quando
+     * l'endpoint preview risponde HTTP 200 ma contiene errs.
+     */
+    mkdir("data", 0755);
+
+    file = fopen("data/coinbase_buy_preview_last.json", "w");
+    if (file == NULL) {
+        return;
+    }
+
+    fputs(response_body, file);
+    fputc('\n', file);
+    fclose(file);
+}
+
+
+static void save_buy_preview_debug_request(const char *request_body) {
+    FILE *file;
+
+    if (request_body == NULL || request_body[0] == '\0') {
+        return;
+    }
+
+    /*
+     * Debug locale intenzionale.
+     * Serve per verificare che i BUY verso Coinbase usino quote_size EUR
+     * con separatore decimale punto, non base_size BTC e non virgola locale.
+     */
+    mkdir("data", 0755);
+
+    file = fopen("data/coinbase_buy_preview_request_last.json", "w");
+    if (file == NULL) {
+        return;
+    }
+
+    fputs(request_body, file);
+    fputc('\n', file);
+    fclose(file);
+}
+
+static void format_decimal_dot(
+    char *buffer,
+    size_t buffer_size,
+    double value,
+    int decimals
+) {
+    size_t i;
+
+    if (buffer == NULL || buffer_size == 0) {
+        return;
+    }
+
+    if (decimals <= 2) {
+        snprintf(buffer, buffer_size, "%.2f", value);
+    } else {
+        snprintf(buffer, buffer_size, "%.8f", value);
+    }
+
+    /*
+     * snprintf segue LC_NUMERIC: in ambiente italiano potrebbe produrre
+     * "10,00". Coinbase vuole sempre decimali con punto nelle stringhe JSON.
+     */
+    for (i = 0; buffer[i] != '\0'; ++i) {
+        if (buffer[i] == ',') {
+            buffer[i] = '.';
+        }
+    }
+}
+
+static const char *first_json_string(cJSON *object, const char *a, const char *b, const char *c) {
+    cJSON *item;
+
+    if (object == NULL) {
+        return NULL;
+    }
+
+    item = cJSON_GetObjectItem(object, a);
+    if (item != NULL && cJSON_IsString(item) && item->valuestring != NULL) {
+        return item->valuestring;
+    }
+
+    if (b != NULL) {
+        item = cJSON_GetObjectItem(object, b);
+        if (item != NULL && cJSON_IsString(item) && item->valuestring != NULL) {
+            return item->valuestring;
+        }
+    }
+
+    if (c != NULL) {
+        item = cJSON_GetObjectItem(object, c);
+        if (item != NULL && cJSON_IsString(item) && item->valuestring != NULL) {
+            return item->valuestring;
+        }
+    }
+
+    return NULL;
+}
+
+static void preview_set_error_message_from_json(CoinbaseOrderPreview *preview, cJSON *json) {
+    cJSON *errs;
+    cJSON *first_error;
+    const char *code = NULL;
+    const char *message = NULL;
+
+    if (preview == NULL || json == NULL) {
+        return;
+    }
+
+    errs = cJSON_GetObjectItem(json, "errs");
+    if (errs != NULL && cJSON_IsArray(errs) && cJSON_GetArraySize(errs) > 0) {
+        first_error = cJSON_GetArrayItem(errs, 0);
+
+        if (first_error != NULL && cJSON_IsString(first_error) && first_error->valuestring != NULL) {
+            snprintf(
+                preview->message,
+                sizeof(preview->message),
+                "Coinbase preview error: %.180s",
+                first_error->valuestring
+            );
+            return;
+        }
+
+        code = first_json_string(first_error, "error_code", "error", "code");
+        message = first_json_string(first_error, "message", "error_message", "description");
+
+        if (code != NULL || message != NULL) {
+            snprintf(
+                preview->message,
+                sizeof(preview->message),
+                "Coinbase preview error: %.64s %.160s",
+                code ? code : "ERR",
+                message ? message : ""
+            );
+            return;
+        }
+
+        preview_set_message(preview, "Coinbase preview ha restituito errs senza dettaglio leggibile");
+        return;
+    }
+
+    code = first_json_string(json, "error", "error_code", "code");
+    message = first_json_string(json, "message", "error_message", "description");
+
+    if (code != NULL || message != NULL) {
+        snprintf(
+            preview->message,
+            sizeof(preview->message),
+            "Coinbase preview error: %.64s %.160s",
+            code ? code : "ERR",
+            message ? message : ""
+        );
+        return;
+    }
+
+    preview_set_message(preview, "Coinbase preview ha restituito errori");
+}
+
 static void parse_preview_response(
     CoinbaseOrderPreview *preview,
     const char *response_body
@@ -195,7 +364,7 @@ static void parse_preview_response(
 
     if (json_array_has_items(cJSON_GetObjectItem(json, "errs"))) {
         preview->allowed = 0;
-        preview_set_message(preview, "Coinbase preview ha restituito errori");
+        preview_set_error_message_from_json(preview, json);
     } else {
         preview->allowed = 1;
         preview_set_message(preview, "Coinbase preview OK");
@@ -217,7 +386,12 @@ static void build_market_ioc_body(
     const char *side_text = side == ORDER_PREVIEW_SIDE_BUY ? "BUY" : "SELL";
     const char *size_field = side == ORDER_PREVIEW_SIDE_BUY ? "quote_size" : "base_size";
 
-    snprintf(amount_text, sizeof(amount_text), "%.8f", amount);
+    format_decimal_dot(
+        amount_text,
+        sizeof(amount_text),
+        amount,
+        side == ORDER_PREVIEW_SIDE_BUY ? 2 : 8
+    );
 
     snprintf(
         buffer,
@@ -310,6 +484,10 @@ static CoinbaseOrderPreview coinbase_order_preview_market(
         amount
     );
 
+    if (side == ORDER_PREVIEW_SIDE_BUY) {
+        save_buy_preview_debug_request(request_body);
+    }
+
     snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", jwt_token);
 
     headers = curl_slist_append(headers, auth_header);
@@ -340,6 +518,9 @@ static CoinbaseOrderPreview coinbase_order_preview_market(
             http_code
         );
     } else {
+        if (side == ORDER_PREVIEW_SIDE_BUY) {
+            save_buy_preview_debug_response(response.memory);
+        }
         parse_preview_response(&preview, response.memory);
     }
 

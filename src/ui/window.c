@@ -88,6 +88,7 @@ typedef struct {
     GtkWidget *micro_live_enabled_entry;
     GtkWidget *micro_live_max_order_eur_entry;
     GtkWidget *micro_live_stop_after_real_order_entry;
+    GtkWidget *micro_live_allow_accumulation_entry;
     GtkWidget *emergency_stop_label;
     GtkWidget *live_trading_arm_label;
     GtkWidget *live_trading_arm_buttons_box;
@@ -435,7 +436,7 @@ static void refresh_dashboard(AppWidgets *widgets) {
     snprintf(
         settings_text,
         sizeof(settings_text),
-        "Strategia: slot %.2f € | buy drop %.2f%% | sell %.2f%% | fee stimata %.2f%% | min profit %.2f € / %.2f%% | liquidità min %.2f%% | riserva %.2f%% | slot riserva sbloccati %d | max slot %d | audit %d giorni | max ordini/giorno %d | cooldown %d sec | max loss %.2f € | max drawdown %.2f%% | micro-live %s | max micro ordine %.2f € | stop dopo ordine %s | kill-switch %s | live arm %s",
+        "Strategia: slot %.2f € | buy drop %.2f%% | sell %.2f%% | fee stimata %.2f%% | min profit %.2f € / %.2f%% | liquidità min %.2f%% | riserva %.2f%% | slot riserva sbloccati %d | max slot %d | audit %d giorni | max ordini/giorno %d | cooldown %d sec | max loss %.2f € | max drawdown %.2f%% | micro-live %s | max micro ordine %.2f € | stop dopo ordine %s | accumulo %s | kill-switch %s | live arm %s",
         settings.slot_amount_eur,
         settings.buy_drop_percent,
         settings.sell_profit_percent,
@@ -454,6 +455,7 @@ static void refresh_dashboard(AppWidgets *widgets) {
         settings.micro_live_enabled ? "ATTIVO" : "disattivato",
         settings.micro_live_max_order_eur,
         settings.micro_live_stop_after_real_order ? "ATTIVO" : "disattivato",
+        settings.micro_live_allow_accumulation ? "ATTIVO" : "disattivato",
         settings.emergency_stop_enabled ? "ATTIVO" : "disattivato",
         settings.live_trading_armed ? "ATTIVO" : "disattivato"
     );
@@ -692,6 +694,9 @@ static void fill_settings_entries(AppWidgets *widgets) {
 
     snprintf(buffer, sizeof(buffer), "%d", settings.micro_live_stop_after_real_order ? 1 : 0);
     gtk_editable_set_text(GTK_EDITABLE(widgets->micro_live_stop_after_real_order_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%d", settings.micro_live_allow_accumulation ? 1 : 0);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->micro_live_allow_accumulation_entry), buffer);
 
     if (widgets->emergency_stop_label != NULL) {
         gtk_label_set_text(
@@ -1088,6 +1093,9 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
 
     settings.micro_live_stop_after_real_order =
         atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->micro_live_stop_after_real_order_entry))) ? 1 : 0;
+
+    settings.micro_live_allow_accumulation =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->micro_live_allow_accumulation_entry))) ? 1 : 0;
 
     settings.runtime_mode =
         get_selected_runtime_mode(widgets->runtime_mode_dropdown);
@@ -1663,7 +1671,7 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
         "Runtime: %s\n"
         "Kill-switch: %s\n"
         "LIVE_TRADING arm: %s\n"
-        "Riserva liquidità: %.2f%% (%s, slot sbloccati %d/%d)\n\n"
+        "Riserva liquidità: %.2f%% (%s, slot sbloccati %d/%d)\nMicro-live accumulo con posizione aperta: %s\n\n"
 
         "=== READINESS ===\n"
         "Stato: %s\n"
@@ -1734,6 +1742,7 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
         reserve_label,
         settings.reserve_released_slots,
         settings.max_slots,
+        settings.micro_live_allow_accumulation ? "ATTIVO" : "disattivato",
 
         readiness.status,
         readiness.blocking_count,
@@ -1928,7 +1937,7 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         "Cooldown ordini: %d sec\n"
         "Max perdita giornaliera: %.2f EUR\n"
         "Max drawdown: %.2f%%\n"
-        "Micro-live: %s | max ordine %.2f EUR | stop dopo ordine %s\n"
+        "Micro-live: %s | max ordine %.2f EUR | stop dopo ordine %s | accumulo %s\n"
         "Volatilità: max %.2f%% in %d sec\n\n"
 
         "=== AUDIT ULTIMI 7 GIORNI ===\n"
@@ -1978,6 +1987,7 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         settings.micro_live_enabled ? "ATTIVO" : "disattivato",
         settings.micro_live_max_order_eur,
         settings.micro_live_stop_after_real_order ? "ATTIVO" : "disattivato",
+        settings.micro_live_allow_accumulation ? "ATTIVO" : "disattivato",
         settings.volatility_max_move_percent,
         settings.volatility_window_seconds,
 
@@ -2174,6 +2184,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *micro_live_enabled_entry;
     GtkWidget *micro_live_max_order_eur_entry;
     GtkWidget *micro_live_stop_after_real_order_entry;
+    GtkWidget *micro_live_allow_accumulation_entry;
     GtkWidget *emergency_stop_label;
     GtkWidget *live_trading_arm_label;
     GtkWidget *live_trading_arm_buttons_box;
@@ -2320,6 +2331,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     micro_live_enabled_entry = gtk_entry_new();
     micro_live_max_order_eur_entry = gtk_entry_new();
     micro_live_stop_after_real_order_entry = gtk_entry_new();
+    micro_live_allow_accumulation_entry = gtk_entry_new();
 
     const char *runtime_modes[] = {
         "SIMULATION",
@@ -2377,6 +2389,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Micro-live attivo (0/1)", micro_live_enabled_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Micro-live max ordine EUR", micro_live_max_order_eur_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Stop dopo ordine reale (0/1)", micro_live_stop_after_real_order_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Consenti accumulo micro-live (0/1)", micro_live_allow_accumulation_entry));
     gtk_box_append(GTK_BOX(settings_box), emergency_stop_label);
     gtk_box_append(GTK_BOX(settings_box), emergency_buttons_box);
     gtk_box_append(GTK_BOX(settings_box), live_trading_arm_label);
@@ -2534,6 +2547,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->micro_live_enabled_entry = micro_live_enabled_entry;
     widgets->micro_live_max_order_eur_entry = micro_live_max_order_eur_entry;
     widgets->micro_live_stop_after_real_order_entry = micro_live_stop_after_real_order_entry;
+    widgets->micro_live_allow_accumulation_entry = micro_live_allow_accumulation_entry;
     widgets->emergency_stop_label = emergency_stop_label;
     widgets->live_trading_arm_label = live_trading_arm_label;
     widgets->live_trading_arm_buttons_box = live_trading_arm_buttons_box;

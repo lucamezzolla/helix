@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static RiskGuardCheck make_check(
     int allowed,
@@ -106,9 +107,28 @@ void risk_guard_audit_if_blocked(
     double btc_balance,
     double eur_balance
 ) {
+    static time_t last_audit_time = 0;
+    static char last_reason[256] = "";
+    time_t now = time(NULL);
+
     if (check.allowed) {
         return;
     }
+
+    /*
+     * Risk guard can be evaluated every engine tick. Keep the first block and
+     * state changes, but avoid writing the same loss warning every two seconds.
+     */
+    if (
+        last_audit_time != 0 &&
+        strcmp(last_reason, check.reason) == 0 &&
+        difftime(now, last_audit_time) < 300.0
+    ) {
+        return;
+    }
+
+    snprintf(last_reason, sizeof(last_reason), "%s", check.reason);
+    last_audit_time = now;
 
     db_log_engine_audit(
         "RISK_GUARD",
