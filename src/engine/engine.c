@@ -1080,7 +1080,7 @@ static void audit_coinbase_order_preview_if_needed(
                     audit_engine_decision(
                         "REAL_SLOT_SELL_PLAN",
                         real_slot_sell_env_allowed ?
-                            "REAL_SLOT_SELL_BLOCKED_BY_IMPLEMENTATION" :
+                            "REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED" :
                             "REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE",
                         real_plan_reason,
                         state->current_price,
@@ -1093,7 +1093,7 @@ static void audit_coinbase_order_preview_if_needed(
                     record_blocked_preview_candidate(
                         best_plan,
                         real_slot_sell_env_allowed ?
-                            "REAL_SLOT_SELL_BLOCKED_BY_IMPLEMENTATION" :
+                            "REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED" :
                             "REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE",
                         real_plan_reason
                     );
