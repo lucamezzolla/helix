@@ -94,6 +94,7 @@ typedef struct {
     GtkWidget *live_trading_arm_buttons_box;
     GtkWidget *arm_live_trading_button;
     GtkWidget *disarm_live_trading_button;
+    GtkWidget *acknowledge_real_order_button;
     GtkWidget *runtime_mode_dropdown;
 
     GtkWidget *coinbase_api_key_entry;
@@ -1021,6 +1022,66 @@ static void on_disarm_live_trading_clicked(GtkButton *button, gpointer user_data
     gtk_label_set_text(
         GTK_LABEL(widgets->status_label),
         "LIVE_TRADING disarmato"
+    );
+
+    fill_settings_entries(widgets);
+    refresh_dashboard(widgets);
+}
+
+
+static void on_acknowledge_real_order_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->state == NULL) {
+        return;
+    }
+
+    char latest_order_id[128];
+    latest_order_id[0] = '\0';
+
+    if (!order_journal_get_latest_real_sent_order_id(latest_order_id, sizeof(latest_order_id))) {
+        gtk_label_set_text(
+            GTK_LABEL(widgets->status_label),
+            "Nessun ordine reale REAL_SENT da riconoscere"
+        );
+        return;
+    }
+
+    StrategySettings settings = settings_load();
+
+    snprintf(
+        settings.micro_live_last_real_order_acknowledged,
+        sizeof(settings.micro_live_last_real_order_acknowledged),
+        "%s",
+        latest_order_id
+    );
+
+    settings_save(&settings);
+
+    char reason[256];
+    snprintf(
+        reason,
+        sizeof(reason),
+        "Ultimo ordine reale riconosciuto manualmente: %s",
+        latest_order_id
+    );
+
+    db_log_engine_audit(
+        "REAL_ORDER_ACKNOWLEDGED",
+        "ACKNOWLEDGED",
+        reason,
+        widgets->state->current_price,
+        widgets->state->btc_balance,
+        widgets->state->eur_balance,
+        0.0,
+        0.0
+    );
+
+    gtk_label_set_text(
+        GTK_LABEL(widgets->status_label),
+        "Ultimo ordine reale riconosciuto: Helix può essere riarmato dopo revisione"
     );
 
     fill_settings_entries(widgets);
@@ -2190,6 +2251,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *live_trading_arm_buttons_box;
     GtkWidget *arm_live_trading_button;
     GtkWidget *disarm_live_trading_button;
+    GtkWidget *acknowledge_real_order_button;
     GtkWidget *runtime_mode_dropdown;
     GtkWidget *save_settings_button;
     GtkWidget *emergency_buttons_box;
@@ -2359,8 +2421,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     live_trading_arm_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     arm_live_trading_button = gtk_button_new_with_label("Arma LIVE_TRADING");
     disarm_live_trading_button = gtk_button_new_with_label("Disarma LIVE_TRADING");
+    acknowledge_real_order_button = gtk_button_new_with_label("Acknowledge ultimo ordine reale");
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), arm_live_trading_button);
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), disarm_live_trading_button);
+    gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), acknowledge_real_order_button);
 
     reserve_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     release_reserve_slot_button = gtk_button_new_with_label("Sblocca 1 slot riserva");
@@ -2553,6 +2617,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->live_trading_arm_buttons_box = live_trading_arm_buttons_box;
     widgets->arm_live_trading_button = arm_live_trading_button;
     widgets->disarm_live_trading_button = disarm_live_trading_button;
+    widgets->acknowledge_real_order_button = acknowledge_real_order_button;
     widgets->runtime_mode_dropdown = runtime_mode_dropdown;
     widgets->coinbase_api_key_entry = coinbase_api_key_entry;
     widgets->coinbase_api_secret_entry = coinbase_api_secret_entry;
@@ -2632,6 +2697,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     g_signal_connect(reset_emergency_stop_button, "clicked", G_CALLBACK(on_reset_emergency_stop_clicked), widgets);
     g_signal_connect(arm_live_trading_button, "clicked", G_CALLBACK(on_arm_live_trading_clicked), widgets);
     g_signal_connect(disarm_live_trading_button, "clicked", G_CALLBACK(on_disarm_live_trading_clicked), widgets);
+    g_signal_connect(acknowledge_real_order_button, "clicked", G_CALLBACK(on_acknowledge_real_order_clicked), widgets);
     g_signal_connect(release_reserve_slot_button, "clicked", G_CALLBACK(on_release_reserve_slot_clicked), widgets);
     g_signal_connect(lock_reserve_slot_button, "clicked", G_CALLBACK(on_lock_reserve_slot_clicked), widgets);
     g_signal_connect(save_coinbase_button, "clicked", G_CALLBACK(on_save_coinbase_clicked), widgets);
