@@ -1041,11 +1041,46 @@ static void audit_coinbase_order_preview_if_needed(
                     best_profit
                 );
 
-                record_blocked_preview_candidate(
-                    best_plan,
-                    sell_profitable ? "SELL_SLOT_PREVIEW_ONLY" : "SELL_SLOT_NOT_PROFITABLE",
-                    best_reason
-                );
+                if (sell_profitable) {
+                    char real_plan_reason[360];
+
+                    snprintf(
+                        real_plan_reason,
+                        sizeof(real_plan_reason),
+                        "REAL SELL slot-based plan pronto ma bloccato | slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%% | create-order SELL reale disabilitato",
+                        best_slot->id,
+                        best_slot->base_size_btc,
+                        best_gross,
+                        best_fee,
+                        best_net,
+                        best_slot->cost_eur,
+                        best_profit,
+                        best_profit_percent
+                    );
+
+                    audit_engine_decision(
+                        "REAL_SLOT_SELL_PLAN",
+                        "REAL_SLOT_SELL_PLAN_BLOCKED",
+                        real_plan_reason,
+                        state->current_price,
+                        best_slot->base_size_btc,
+                        best_net,
+                        best_fee,
+                        best_profit
+                    );
+
+                    record_blocked_preview_candidate(
+                        best_plan,
+                        "REAL_SLOT_SELL_PLAN_BLOCKED",
+                        real_plan_reason
+                    );
+                } else {
+                    record_blocked_preview_candidate(
+                        best_plan,
+                        "SELL_SLOT_NOT_PROFITABLE",
+                        best_reason
+                    );
+                }
             }
         } else {
             double cost_basis = current_cost_basis(state);
