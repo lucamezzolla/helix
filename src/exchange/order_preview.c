@@ -219,6 +219,44 @@ static void save_buy_preview_debug_request(const char *request_body) {
     fclose(file);
 }
 
+static void save_sell_preview_debug_response(const char *response_body) {
+    FILE *file;
+
+    if (response_body == NULL || response_body[0] == '\0') {
+        return;
+    }
+
+    mkdir("data", 0755);
+
+    file = fopen("data/coinbase_sell_preview_last.json", "w");
+    if (file == NULL) {
+        return;
+    }
+
+    fputs(response_body, file);
+    fputc('\n', file);
+    fclose(file);
+}
+
+static void save_sell_preview_debug_request(const char *request_body) {
+    FILE *file;
+
+    if (request_body == NULL || request_body[0] == '\0') {
+        return;
+    }
+
+    mkdir("data", 0755);
+
+    file = fopen("data/coinbase_sell_preview_request_last.json", "w");
+    if (file == NULL) {
+        return;
+    }
+
+    fputs(request_body, file);
+    fputc('\n', file);
+    fclose(file);
+}
+
 static void format_decimal_dot(
     char *buffer,
     size_t buffer_size,
@@ -486,6 +524,8 @@ static CoinbaseOrderPreview coinbase_order_preview_market(
 
     if (side == ORDER_PREVIEW_SIDE_BUY) {
         save_buy_preview_debug_request(request_body);
+    } else if (side == ORDER_PREVIEW_SIDE_SELL) {
+        save_sell_preview_debug_request(request_body);
     }
 
     snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", jwt_token);
@@ -520,6 +560,8 @@ static CoinbaseOrderPreview coinbase_order_preview_market(
     } else {
         if (side == ORDER_PREVIEW_SIDE_BUY) {
             save_buy_preview_debug_response(response.memory);
+        } else if (side == ORDER_PREVIEW_SIDE_SELL) {
+            save_sell_preview_debug_response(response.memory);
         }
         parse_preview_response(&preview, response.memory);
     }

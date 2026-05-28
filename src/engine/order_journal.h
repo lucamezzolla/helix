@@ -18,6 +18,17 @@ typedef struct {
 
 
 typedef struct {
+    int found;
+    char client_order_id[96];
+    char coinbase_order_id[128];
+    double quote_size_eur;
+    double fee_eur;
+    double base_size_btc;
+    double avg_price_eur;
+} RealBuySlotRecord;
+
+
+typedef struct {
     int dry_run_last_7_days;
     int dry_run_ready_last_7_days;
     int dry_run_blocked_last_7_days;
@@ -61,6 +72,10 @@ int order_journal_real_sent_last_24h(void);
 
 int order_journal_get_latest_unreconciled_real_order(
     RealOrderJournalRecord *record
+);
+
+int order_journal_get_latest_real_buy_slot(
+    RealBuySlotRecord *slot
 );
 
 int order_journal_record_post_order_reconciliation(

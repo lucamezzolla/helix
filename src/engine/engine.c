@@ -879,62 +879,182 @@ static void audit_coinbase_order_preview_if_needed(
     last_preview_time = now;
 
     if (state->btc_balance > 0.0) {
-        double cost_basis = current_cost_basis(state);
-        TradePreview local_preview = trade_preview_sell(
-            state->btc_balance,
-            state->current_price,
-            cost_basis,
-            estimate_fee_rate(settings),
-            settings->min_profit_eur,
-            settings->min_profit_percent
-        );
-        CoinbaseOrderPreview preview =
-            coinbase_order_preview_market_sell_btc("BTC-EUR", state->btc_balance);
-        ExchangeSafetyCheck safety = exchange_safety_check_sell(
-            local_preview,
-            preview,
-            state->btc_balance
-        );
+        RealBuySlotRecord sell_slot;
 
-        audit_engine_decision(
-            "EXCHANGE_SAFETY_SELL",
-            safety.decision,
-            safety.reason,
-            state->current_price,
-            state->btc_balance,
-            safety.exchange_total_eur,
-            safety.exchange_fee_eur,
-            local_preview.net_profit
-        );
+        memset(&sell_slot, 0, sizeof(sell_slot));
+        order_journal_get_latest_real_buy_slot(&sell_slot);
 
-        {
+        if (
+            sell_slot.found &&
+            sell_slot.base_size_btc > 0.0 &&
+            sell_slot.base_size_btc <= state->btc_balance
+        ) {
+            double slot_cost_basis = sell_slot.quote_size_eur;
+            double slot_base_size = sell_slot.base_size_btc;
+            double sell_gross = 0.0;
+            double sell_fee = 0.0;
+            double sell_net = 0.0;
+            double sell_profit = 0.0;
+            double sell_profit_percent = 0.0;
+            int sell_profitable = 0;
+            char sell_reason[256];
+
+            TradePreview local_preview = trade_preview_sell(
+                slot_base_size,
+                state->current_price,
+                slot_cost_basis,
+                estimate_fee_rate(settings),
+                settings->min_profit_eur,
+                settings->min_profit_percent
+            );
+
+            CoinbaseOrderPreview preview =
+                coinbase_order_preview_market_sell_btc("BTC-EUR", slot_base_size);
+
+            OrderExecutionPlan plan = order_executor_plan_market_sell_dry_run(
+                "BTC-EUR",
+                slot_base_size,
+                preview
+            );
+
+            if (preview.connected && preview.allowed && preview.order_total > 0.0) {
+                sell_gross = preview.order_total;
+                sell_fee = preview.commission_total;
+                /*
+                 * Coinbase preview order_total for SELL is treated as gross
+                 * proceeds in this diagnostic path. Net proceeds are gross
+                 * minus commission_total.
+                 */
+                sell_net = sell_gross - sell_fee;
+                sell_profit = sell_net - slot_cost_basis;
+
+                if (slot_cost_basis > 0.0) {
+                    sell_profit_percent = (sell_profit / slot_cost_basis) * 100.0;
+                }
+
+                sell_profitable =
+                    sell_profit >= settings->min_profit_eur &&
+                    sell_profit_percent >= settings->min_profit_percent;
+
+                snprintf(
+                    sell_reason,
+                    sizeof(sell_reason),
+                    "SELL Coinbase preview slot | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%%",
+                    slot_base_size,
+                    sell_gross,
+                    sell_fee,
+                    sell_net,
+                    slot_cost_basis,
+                    sell_profit,
+                    sell_profit_percent
+                );
+
+                audit_engine_decision(
+                    "EXCHANGE_SAFETY_SELL",
+                    sell_profitable ? "SELL_SLOT_PREVIEW_PROFITABLE" : "SELL_SLOT_PREVIEW_NOT_PROFITABLE",
+                    sell_reason,
+                    state->current_price,
+                    slot_base_size,
+                    sell_net,
+                    sell_fee,
+                    sell_profit
+                );
+
+                snprintf(
+                    sell_reason,
+                    sizeof(sell_reason),
+                    "%s | ordine SELL reale ancora disabilitato: diagnostica slot",
+                    sell_profitable ?
+                        "SELL slot teoricamente profittevole" :
+                        "SELL slot non profittevole"
+                );
+
+                record_blocked_preview_candidate(
+                    plan,
+                    sell_profitable ? "SELL_SLOT_PREVIEW_ONLY" : "SELL_SLOT_NOT_PROFITABLE",
+                    sell_reason
+                );
+            } else {
+                snprintf(
+                    sell_reason,
+                    sizeof(sell_reason),
+                    "SELL Coinbase preview slot non valida | base %.8f | http %ld | %.120s",
+                    slot_base_size,
+                    preview.http_code,
+                    preview.message
+                );
+
+                audit_engine_decision(
+                    "EXCHANGE_SAFETY_SELL",
+                    "SELL_SLOT_PREVIEW_UNAVAILABLE",
+                    sell_reason,
+                    state->current_price,
+                    slot_base_size,
+                    0.0,
+                    0.0,
+                    0.0
+                );
+
+                record_blocked_preview_candidate(
+                    plan,
+                    "SELL_SLOT_PREVIEW_UNAVAILABLE",
+                    sell_reason
+                );
+            }
+
+            (void)local_preview;
+        } else {
+            double cost_basis = current_cost_basis(state);
+            TradePreview local_preview = trade_preview_sell(
+                state->btc_balance,
+                state->current_price,
+                cost_basis,
+                estimate_fee_rate(settings),
+                settings->min_profit_eur,
+                settings->min_profit_percent
+            );
+
+            /*
+             * Diagnostic fallback only. Do not sell the whole wallet balance
+             * when a micro-live slot cannot be identified.
+             */
+            CoinbaseOrderPreview preview =
+                coinbase_order_preview_market_sell_btc("BTC-EUR", state->btc_balance);
+
             OrderExecutionPlan plan = order_executor_plan_market_sell_dry_run(
                 "BTC-EUR",
                 state->btc_balance,
                 preview
             );
 
-            if (safety.allowed) {
-                audit_order_execution_plan("ORDER_EXECUTOR_SELL", plan, state, settings);
-            } else {
-                char blocked_reason[256];
+            char blocked_reason[256];
 
-                snprintf(
-                    blocked_reason,
-                    sizeof(blocked_reason),
-                    "SELL candidate bloccato | %.140s | net %.2f | profit %.2f EUR %.2f%%",
-                    safety.reason,
-                    local_preview.net_value,
-                    local_preview.net_profit,
-                    local_preview.net_profit_percent
-                );
+            snprintf(
+                blocked_reason,
+                sizeof(blocked_reason),
+                "SELL wallet totale non consentita: nessuno slot reale aperto identificato | wallet BTC %.8f | net locale %.2f | profit %.2f EUR %.2f%%",
+                state->btc_balance,
+                local_preview.net_value,
+                local_preview.net_profit,
+                local_preview.net_profit_percent
+            );
 
-                record_blocked_preview_candidate(
-                    plan,
-                    "SELL_CANDIDATE_BLOCKED",
-                    blocked_reason
-                );
-            }
+            audit_engine_decision(
+                "EXCHANGE_SAFETY_SELL",
+                "SELL_WALLET_BLOCKED_NO_SLOT",
+                blocked_reason,
+                state->current_price,
+                state->btc_balance,
+                preview.order_total,
+                preview.commission_total,
+                local_preview.net_profit
+            );
+
+            record_blocked_preview_candidate(
+                plan,
+                "SELL_WALLET_BLOCKED_NO_SLOT",
+                blocked_reason
+            );
         }
 
         if (!settings->micro_live_allow_accumulation) {
@@ -1168,6 +1288,15 @@ static int enforce_micro_live_stop_after_real_order(
     }
 
     if (!settings->micro_live_stop_after_real_order) {
+        return 0;
+    }
+
+    /*
+     * Stop-after-real-order is a LIVE_TRADING protection.
+     * It must not prevent diagnostic/read-only restarts after a real order
+     * has already been reviewed and reconciled.
+     */
+    if (settings->runtime_mode != RUNTIME_MODE_LIVE_TRADING) {
         return 0;
     }
 

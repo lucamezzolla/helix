@@ -378,6 +378,82 @@ int order_journal_real_sent_last_24h(void) {
 }
 
 
+int order_journal_get_latest_real_buy_slot(
+    RealBuySlotRecord *slot
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (slot == NULL) {
+        return 0;
+    }
+
+    memset(slot, 0, sizeof(*slot));
+
+    if (!order_journal_init()) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    /*
+     * Current slot model, v0.2.0-rc1:
+     * use the latest real BUY accepted by Coinbase as the sellable micro-slot.
+     *
+     * This is intentionally narrower than selling the full wallet balance.
+     * It prevents the SELL path from evaluating the whole historical BTC
+     * position when only the latest micro-live BUY slot should be checked.
+     */
+    const char *sql =
+        "SELECT client_order_id, coinbase_order_id, "
+        "requested_quote_size, preview_fee_eur, preview_base_size, preview_avg_price "
+        "FROM order_journal "
+        "WHERE side = 'BUY' "
+        "  AND status = 'REAL_SENT' "
+        "  AND coinbase_order_id IS NOT NULL "
+        "  AND coinbase_order_id <> '' "
+        "  AND preview_base_size > 0 "
+        "ORDER BY id DESC "
+        "LIMIT 1;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *client_order_id = sqlite3_column_text(stmt, 0);
+        const unsigned char *coinbase_order_id = sqlite3_column_text(stmt, 1);
+
+        slot->found = 1;
+        snprintf(
+            slot->client_order_id,
+            sizeof(slot->client_order_id),
+            "%s",
+            client_order_id ? (const char *)client_order_id : ""
+        );
+        snprintf(
+            slot->coinbase_order_id,
+            sizeof(slot->coinbase_order_id),
+            "%s",
+            coinbase_order_id ? (const char *)coinbase_order_id : ""
+        );
+
+        slot->quote_size_eur = sqlite3_column_double(stmt, 2);
+        slot->fee_eur = sqlite3_column_double(stmt, 3);
+        slot->base_size_btc = sqlite3_column_double(stmt, 4);
+        slot->avg_price_eur = sqlite3_column_double(stmt, 5);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return slot->found;
+}
+
+
 int order_journal_get_latest_unreconciled_real_order(
     RealOrderJournalRecord *record
 ) {
