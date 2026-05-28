@@ -97,6 +97,7 @@ typedef struct {
     GtkWidget *acknowledge_real_order_button;
     GtkWidget *seed_paper_slots_button;
     GtkWidget *clear_paper_slots_button;
+    GtkWidget *run_paper_best_profit_button;
     GtkWidget *runtime_mode_dropdown;
 
     GtkWidget *coinbase_api_key_entry;
@@ -1152,6 +1153,200 @@ static void on_clear_paper_slots_clicked(GtkButton *button, gpointer user_data) 
         0.0,
         0.0
     );
+
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+
+    refresh_dashboard(widgets);
+}
+
+
+static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->state == NULL) {
+        return;
+    }
+
+    StrategySettings settings = settings_load();
+
+    if (widgets->state->current_price <= 0.0) {
+        gtk_label_set_text(
+            GTK_LABEL(widgets->status_label),
+            "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido"
+        );
+
+        db_log_engine_audit(
+            "PAPER_SIM",
+            "BEST_PROFIT_BLOCKED_NO_PRICE",
+            "Paper BEST_PROFIT bloccato: prezzo corrente non valido",
+            widgets->state->current_price,
+            widgets->state->btc_balance,
+            widgets->state->eur_balance,
+            0.0,
+            0.0
+        );
+
+        return;
+    }
+
+    PaperPositionSlotRecord slots[64];
+    memset(slots, 0, sizeof(slots));
+
+    int slot_count = db_get_open_paper_position_slots(
+        slots,
+        64
+    );
+
+    if (slot_count <= 0) {
+        gtk_label_set_text(
+            GTK_LABEL(widgets->status_label),
+            "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN"
+        );
+
+        db_log_engine_audit(
+            "PAPER_SIM",
+            "BEST_PROFIT_NO_OPEN_SLOTS",
+            "Paper BEST_PROFIT: nessuno slot paper OPEN",
+            widgets->state->current_price,
+            widgets->state->btc_balance,
+            widgets->state->eur_balance,
+            0.0,
+            0.0
+        );
+
+        return;
+    }
+
+    double fee_rate = settings.estimated_fee_percent / 100.0;
+    if (fee_rate < 0.0) {
+        fee_rate = 0.0;
+    }
+
+    int best_index = -1;
+    double best_gross = 0.0;
+    double best_fee = 0.0;
+    double best_net = 0.0;
+    double best_profit = 0.0;
+    double best_profit_percent = 0.0;
+
+    for (int i = 0; i < slot_count; i++) {
+        double gross = slots[i].base_size_btc * widgets->state->current_price;
+        double fee = gross * fee_rate;
+        double net = gross - fee;
+        double profit = net - slots[i].cost_eur;
+        double profit_percent = slots[i].cost_eur > 0.0 ?
+            (profit / slots[i].cost_eur) * 100.0 :
+            0.0;
+
+        char reason[320];
+        snprintf(
+            reason,
+            sizeof(reason),
+            "Paper slot %s valutato | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%%",
+            slots[i].label,
+            gross,
+            fee,
+            net,
+            slots[i].cost_eur,
+            profit,
+            profit_percent
+        );
+
+        db_log_engine_audit(
+            "PAPER_SIM",
+            "BEST_PROFIT_SLOT_EVALUATED",
+            reason,
+            widgets->state->current_price,
+            slots[i].base_size_btc,
+            net,
+            fee,
+            profit
+        );
+
+        if (best_index < 0 || profit > best_profit) {
+            best_index = i;
+            best_gross = gross;
+            best_fee = fee;
+            best_net = net;
+            best_profit = profit;
+            best_profit_percent = profit_percent;
+        }
+    }
+
+    if (best_index < 0) {
+        gtk_label_set_text(
+            GTK_LABEL(widgets->status_label),
+            "Paper/SIM BEST_PROFIT: nessuno slot selezionabile"
+        );
+        return;
+    }
+
+    PaperPositionSlotRecord *best = &slots[best_index];
+
+    int profitable =
+        best_profit >= settings.min_profit_eur &&
+        best_profit_percent >= settings.min_profit_percent;
+
+    char message[360];
+
+    if (profitable) {
+        int closed = db_close_paper_position_slot(
+            best->id,
+            best_net,
+            best_profit
+        );
+
+        snprintf(
+            message,
+            sizeof(message),
+            "Paper BEST_PROFIT: slot %s scelto e %s | gross %.2f | fee %.2f | net %.2f | profit %.2f EUR %.2f%%",
+            best->label,
+            closed ? "chiuso" : "NON chiuso",
+            best_gross,
+            best_fee,
+            best_net,
+            best_profit,
+            best_profit_percent
+        );
+
+        db_log_engine_audit(
+            "PAPER_SIM",
+            closed ? "BEST_PROFIT_SLOT_CLOSED" : "BEST_PROFIT_CLOSE_FAILED",
+            message,
+            widgets->state->current_price,
+            best->base_size_btc,
+            best_net,
+            best_fee,
+            best_profit
+        );
+    } else {
+        snprintf(
+            message,
+            sizeof(message),
+            "Paper BEST_PROFIT: slot %s migliore ma non profittevole | gross %.2f | fee %.2f | net %.2f | profit %.2f EUR %.2f%% | soglie %.2f EUR %.2f%%",
+            best->label,
+            best_gross,
+            best_fee,
+            best_net,
+            best_profit,
+            best_profit_percent,
+            settings.min_profit_eur,
+            settings.min_profit_percent
+        );
+
+        db_log_engine_audit(
+            "PAPER_SIM",
+            "BEST_PROFIT_NOT_PROFITABLE",
+            message,
+            widgets->state->current_price,
+            best->base_size_btc,
+            best_net,
+            best_fee,
+            best_profit
+        );
+    }
 
     gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
 
@@ -2325,6 +2520,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *paper_slots_buttons_box;
     GtkWidget *seed_paper_slots_button;
     GtkWidget *clear_paper_slots_button;
+    GtkWidget *run_paper_best_profit_button;
     GtkWidget *runtime_mode_dropdown;
     GtkWidget *save_settings_button;
     GtkWidget *emergency_buttons_box;
@@ -2502,8 +2698,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     paper_slots_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     seed_paper_slots_button = gtk_button_new_with_label("Seed paper slots demo");
     clear_paper_slots_button = gtk_button_new_with_label("Clear paper slots");
+    run_paper_best_profit_button = gtk_button_new_with_label("Run paper BEST_PROFIT");
     gtk_box_append(GTK_BOX(paper_slots_buttons_box), seed_paper_slots_button);
     gtk_box_append(GTK_BOX(paper_slots_buttons_box), clear_paper_slots_button);
+    gtk_box_append(GTK_BOX(paper_slots_buttons_box), run_paper_best_profit_button);
 
     reserve_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     release_reserve_slot_button = gtk_button_new_with_label("Sblocca 1 slot riserva");
@@ -2700,6 +2898,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->acknowledge_real_order_button = acknowledge_real_order_button;
     widgets->seed_paper_slots_button = seed_paper_slots_button;
     widgets->clear_paper_slots_button = clear_paper_slots_button;
+    widgets->run_paper_best_profit_button = run_paper_best_profit_button;
     widgets->runtime_mode_dropdown = runtime_mode_dropdown;
     widgets->coinbase_api_key_entry = coinbase_api_key_entry;
     widgets->coinbase_api_secret_entry = coinbase_api_secret_entry;
@@ -2782,6 +2981,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     g_signal_connect(acknowledge_real_order_button, "clicked", G_CALLBACK(on_acknowledge_real_order_clicked), widgets);
     g_signal_connect(seed_paper_slots_button, "clicked", G_CALLBACK(on_seed_paper_slots_clicked), widgets);
     g_signal_connect(clear_paper_slots_button, "clicked", G_CALLBACK(on_clear_paper_slots_clicked), widgets);
+    g_signal_connect(run_paper_best_profit_button, "clicked", G_CALLBACK(on_run_paper_best_profit_clicked), widgets);
     g_signal_connect(release_reserve_slot_button, "clicked", G_CALLBACK(on_release_reserve_slot_clicked), widgets);
     g_signal_connect(lock_reserve_slot_button, "clicked", G_CALLBACK(on_lock_reserve_slot_clicked), widgets);
     g_signal_connect(save_coinbase_button, "clicked", G_CALLBACK(on_save_coinbase_clicked), widgets);
