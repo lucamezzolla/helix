@@ -48,6 +48,21 @@ typedef struct {
 
 
 
+
+typedef struct {
+    int id;
+    char label[96];
+    double base_size_btc;
+    double cost_eur;
+    double buy_fee_eur;
+    double avg_buy_price;
+    char status[16];
+    char opened_at[32];
+    char closed_at[32];
+    double sell_net_eur;
+    double realized_profit_eur;
+} PaperPositionSlotRecord;
+
 typedef struct {
     int id;
     char buy_order_id[128];
@@ -86,6 +101,30 @@ int db_close_position_slot(
     double sell_net_eur,
     double realized_profit_eur
 );
+
+
+int db_create_paper_position_slot(
+    const char *label,
+    double base_size_btc,
+    double cost_eur,
+    double buy_fee_eur,
+    double avg_buy_price
+);
+
+int db_get_open_paper_position_slots(
+    PaperPositionSlotRecord *records,
+    int max_records
+);
+
+int db_close_paper_position_slot(
+    int slot_id,
+    double sell_net_eur,
+    double realized_profit_eur
+);
+
+int db_clear_paper_position_slots(void);
+
+int db_seed_demo_paper_position_slots(void);
 
 typedef struct {
     int total_last_days;

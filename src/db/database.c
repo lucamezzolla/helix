@@ -152,6 +152,31 @@ int db_init(void) {
     }
 
     sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_position_slots_status ON position_slots(status);", NULL, NULL, NULL);
+
+    const char *paper_position_slots_sql =
+        "CREATE TABLE IF NOT EXISTS paper_position_slots ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "label TEXT NOT NULL UNIQUE,"
+        "base_size_btc REAL NOT NULL,"
+        "cost_eur REAL NOT NULL,"
+        "buy_fee_eur REAL DEFAULT 0,"
+        "avg_buy_price REAL DEFAULT 0,"
+        "status TEXT NOT NULL DEFAULT 'OPEN',"
+        "opened_at TEXT DEFAULT CURRENT_TIMESTAMP,"
+        "closed_at TEXT DEFAULT '',"
+        "sell_net_eur REAL DEFAULT 0,"
+        "realized_profit_eur REAL DEFAULT 0"
+        ");";
+
+    if (sqlite3_exec(db, paper_position_slots_sql, NULL, NULL, &err) != SQLITE_OK) {
+        fprintf(stderr, "Errore SQL paper_position_slots: %s\n", err);
+        sqlite3_free(err);
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_paper_position_slots_status ON paper_position_slots(status);", NULL, NULL, NULL);
+
     sqlite3_close(db);
 
     return 1;
@@ -1076,4 +1101,183 @@ int db_close_position_slot(
     sqlite3_close(db);
 
     return ok;
+}
+
+
+int db_create_paper_position_slot(
+    const char *label,
+    double base_size_btc,
+    double cost_eur,
+    double buy_fee_eur,
+    double avg_buy_price
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (label == NULL || label[0] == '\0') {
+        return 0;
+    }
+
+    if (base_size_btc <= 0.0 || cost_eur <= 0.0) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "INSERT OR IGNORE INTO paper_position_slots "
+        "(label, base_size_btc, cost_eur, buy_fee_eur, avg_buy_price, status) "
+        "VALUES (?, ?, ?, ?, ?, 'OPEN');";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, label, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(stmt, 2, base_size_btc);
+    sqlite3_bind_double(stmt, 3, cost_eur);
+    sqlite3_bind_double(stmt, 4, buy_fee_eur);
+    sqlite3_bind_double(stmt, 5, avg_buy_price);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+int db_get_open_paper_position_slots(
+    PaperPositionSlotRecord *records,
+    int max_records
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int count = 0;
+
+    if (records == NULL || max_records <= 0) {
+        return 0;
+    }
+
+    memset(records, 0, sizeof(PaperPositionSlotRecord) * (size_t)max_records);
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT id, label, base_size_btc, cost_eur, buy_fee_eur, avg_buy_price, "
+        "       status, opened_at, closed_at, sell_net_eur, realized_profit_eur "
+        "FROM paper_position_slots "
+        "WHERE status = 'OPEN' "
+        "ORDER BY opened_at ASC, id ASC "
+        "LIMIT ?;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_int(stmt, 1, max_records);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max_records) {
+        PaperPositionSlotRecord *record = &records[count];
+        const unsigned char *text;
+
+        record->id = sqlite3_column_int(stmt, 0);
+
+        text = sqlite3_column_text(stmt, 1);
+        snprintf(record->label, sizeof(record->label), "%s", text ? (const char *)text : "");
+
+        record->base_size_btc = sqlite3_column_double(stmt, 2);
+        record->cost_eur = sqlite3_column_double(stmt, 3);
+        record->buy_fee_eur = sqlite3_column_double(stmt, 4);
+        record->avg_buy_price = sqlite3_column_double(stmt, 5);
+
+        text = sqlite3_column_text(stmt, 6);
+        snprintf(record->status, sizeof(record->status), "%s", text ? (const char *)text : "");
+
+        text = sqlite3_column_text(stmt, 7);
+        snprintf(record->opened_at, sizeof(record->opened_at), "%s", text ? (const char *)text : "");
+
+        text = sqlite3_column_text(stmt, 8);
+        snprintf(record->closed_at, sizeof(record->closed_at), "%s", text ? (const char *)text : "");
+
+        record->sell_net_eur = sqlite3_column_double(stmt, 9);
+        record->realized_profit_eur = sqlite3_column_double(stmt, 10);
+
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return count;
+}
+
+int db_close_paper_position_slot(
+    int slot_id,
+    double sell_net_eur,
+    double realized_profit_eur
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (slot_id <= 0) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "UPDATE paper_position_slots "
+        "SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, "
+        "    sell_net_eur = ?, realized_profit_eur = ? "
+        "WHERE id = ? AND status = 'OPEN';";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_double(stmt, 1, sell_net_eur);
+    sqlite3_bind_double(stmt, 2, realized_profit_eur);
+    sqlite3_bind_int(stmt, 3, slot_id);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) == 1;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+int db_clear_paper_position_slots(void) {
+    sqlite3 *db;
+    int ok = 0;
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    ok = sqlite3_exec(db, "DELETE FROM paper_position_slots;", NULL, NULL, NULL) == SQLITE_OK;
+
+    sqlite3_close(db);
+
+    return ok;
+}
+
+int db_seed_demo_paper_position_slots(void) {
+    int created = 0;
+
+    created += db_create_paper_position_slot("paper-slot-a", 0.00015000, 10.00, 0.12, 66666.67) ? 1 : 0;
+    created += db_create_paper_position_slot("paper-slot-b", 0.00016500, 10.00, 0.12, 60606.06) ? 1 : 0;
+    created += db_create_paper_position_slot("paper-slot-c", 0.00018000, 10.00, 0.12, 55555.56) ? 1 : 0;
+
+    return created;
 }
