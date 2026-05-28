@@ -1,539 +1,234 @@
 # Helix
 
-Helix è un'applicazione desktop scritta in **C** con interfaccia **GTK4**. Il progetto nasce come percorso didattico e tecnico per costruire, capire e controllare un motore di trading prudente su **BTC-EUR** collegato a **Coinbase**.
+Helix è un'applicazione desktop scritta in **C** con interfaccia **GTK4**. Il progetto nasce come motore prudente di trading su **BTC-EUR** collegato a Coinbase, sviluppato con una regola fondamentale: prima la sicurezza, poi l'automazione.
 
-La filosofia del progetto è semplice ma molto rigida:
+Helix non è pensato per operare in modo aggressivo o autonomo senza controllo umano. L'obiettivo della versione attuale è arrivare a una **produzione controllata**, con micro-importi, uno slot alla volta, stop automatico dopo ogni ordine reale e riconciliazione obbligatoria.
 
-- Helix non deve mai comprare usando tutto il saldo disponibile.
-- Helix non deve mai vendere tutto il wallet BTC.
-- Helix deve lavorare a **slot/lotti**.
-- Ogni BUY reale apre uno slot.
-- Ogni SELL deve valutare solo slot aperti.
-- Una SELL può chiudere solo lo slot scelto, non il saldo globale.
-- La riserva EUR non deve essere usata dai BUY normali.
-- Qualsiasi operazione reale deve essere protetta, tracciata, riconciliata e fermare il bot subito dopo.
-
-> ⚠️ **Attenzione**  
-> Helix può interagire con denaro reale. Il codice deve essere trattato come software critico: prima sicurezza, poi studio, poi automazione.
+> ⚠️ Helix può interagire con denaro reale. Prima di qualunque test live bisogna verificare codice, database, configurazione `.env`, log, journal e stato Coinbase.
 
 ---
 
-## Stato attuale del progetto
+## Principi del progetto
 
-Branch di lavoro corrente:
+Helix segue alcune regole rigide:
+
+- non compra mai usando tutto il saldo disponibile;
+- non vende mai l'intero wallet BTC;
+- compra e vende a **slot/lotti**;
+- ogni BUY reale deve aprire uno slot reale;
+- ogni SELL deve valutare solo slot aperti;
+- una SELL deve chiudere solo lo slot scelto, non il saldo globale;
+- la riserva EUR resta protetta;
+- ogni ordine reale deve essere tracciato in `order_journal`;
+- ogni ordine reale deve essere riconciliato dopo Coinbase;
+- dopo ogni ordine reale Helix deve fermarsi;
+- l'utente deve fare acknowledge manuale prima di procedere.
+
+La regola d'oro è:
+
+```text
+Meglio non fare nulla che fare un ordine ambiguo.
+```
+
+---
+
+## Stato attuale
+
+Branch principale di sviluppo controllato:
 
 ```bash
 live-candidate
 ```
 
-Milestone precedente importante:
+Ultime milestone rilevanti:
 
 ```text
-v0.2.0-rc1
+v0.2.2-paper-best-profit
+v0.2.3-guarded-slot-sell-groundwork
+v0.2.4-sell-path-readiness
+v0.2.5-preprod-checklist
 ```
 
-Stato attuale dopo la patch slot/lotti:
+Stato tecnico attuale:
 
 ```text
-Primo BUY reale BTC-EUR completato e riconciliato     ✅
-Tabella position_slots creata                         ✅
-Primo BUY reale importato come slot OPEN              ✅
-SELL preview per slot funzionante                     ✅
-Scelta BEST_PROFIT diagnostica funzionante            ✅
-SELL reale ancora disabilitata                        ✅
-Vendita dell'intero wallet bloccata                   ✅
-Rebuild position_slots da BUY reali migliorata        ✅
-Acknowledge post real order impostato lato settings   ⚠️ da completare in UI
-Modalità paper/sim                                    ⚠️ da progettare
-SELL reale slot-based                                 ❌ non ancora abilitata
+BUY reale micro validato                         ✅
+Post-order reconciliation BUY reale OK           ✅
+position_slots reale attiva                      ✅
+Primo slot reale OPEN                            ✅
+SELL preview per slot                            ✅
+BEST_PROFIT diagnostico su slot reali            ✅
+PAPER/SIM isolato                                ✅
+paper BEST_PROFIT funzionante                    ✅
+Acknowledge ultimo ordine reale                  ✅
+Gate HELIX_ALLOW_REAL_SLOT_SELL                  ✅
+Lookup slot reale per futura SELL reconciliation ✅
+SELL reconciliation con chiusura slot preparata  ✅
+SELL reale ancora disabilitata                   ✅
 ```
 
-Helix ha già eseguito un primo micro-BUY reale su Coinbase:
-
-```text
-Prodotto:        BTC-EUR
-Tipo:            Market BUY
-Importo:         circa 10 EUR
-Quantità BTC:    circa 0.00015346 BTC
-Stato Coinbase:  FILLED
-Reconciliation:  POST_ORDER_RECON_OK
-```
-
-Dopo il primo ordine reale, Helix ha eseguito lo stop automatico:
-
-```text
-MICRO_LIVE STOP_AFTER_REAL_ORDER
-```
-
-Questo comportamento è corretto: dopo un ordine reale, il bot deve fermarsi e richiedere revisione manuale.
+Helix è quindi in stato **pre-produzione controllata**, non ancora in produzione autonoma.
 
 ---
 
-## Obiettivo tecnico
+## Cosa Helix può fare ora
 
-L'obiettivo di Helix non è “fare trading aggressivo”. L'obiettivo è costruire un sistema controllabile, auditabile e prudente che permetta di studiare:
+Modalità attualmente considerate accettabili:
 
-- programmazione C reale;
-- GTK4;
-- SQLite;
-- chiamate API Coinbase;
-- autenticazione;
-- logging;
-- gestione del rischio;
-- progettazione di stato persistente;
-- trading a slot/lotti;
-- riconciliazione post-ordine;
-- modalità live, readonly, paper e simulazione.
+```text
+SIMULATION              ✅
+LIVE_READONLY           ✅
+PAPER/SIM               ✅
+Micro-live BUY vigilato ✅ / ⚠️
+```
 
-Helix deve procedere per milestone piccole, testabili e reversibili.
+Funzionalità validate:
+
+- leggere stato e impostazioni;
+- recuperare saldo/wallet in readonly;
+- fare preview Coinbase;
+- eseguire un micro BUY reale controllato;
+- riconciliare il BUY reale;
+- registrare il BUY reale come slot;
+- valutare SELL preview per slot;
+- scegliere lo slot migliore con BEST_PROFIT;
+- simulare BUY/SELL paper;
+- chiudere slot paper;
+- preparare il percorso di chiusura slot reale dopo futura SELL riconciliata.
 
 ---
 
-## Regola fondamentale: slot/lotti
+## Cosa Helix NON deve ancora fare
 
-Helix non ragiona così:
-
-```text
-BUY  -> compro tutto quello che posso
-SELL -> vendo tutto quello che ho
-```
-
-Helix deve ragionare così:
+La versione attuale **non deve**:
 
 ```text
-BUY  -> compro un piccolo slot configurato in EUR
-SELL -> vendo solo lo slot BTC scelto
+eseguire SELL reale autonomamente       ❌
+vendere tutto il wallet BTC             ❌
+fare più ordini reali consecutivi       ❌
+operare 24/7 senza supervisione         ❌
+usare automaticamente la riserva EUR    ❌
+chiudere slot reali senza FILLED        ❌
 ```
 
-Esempio:
-
-```text
-Saldo EUR disponibile: 50 EUR
-Slot configurato:      10 EUR
-
-BUY:
-  usa circa 10 EUR
-
-SELL:
-  vende solo la quantità BTC dello slot aperto
-```
-
-Questo evita che una SELL venda accidentalmente tutto il wallet Coinbase.
+La SELL reale slot-based è ancora intenzionalmente bloccata.
 
 ---
 
-## Concetto di slot
+## Struttura del progetto
 
-Uno slot rappresenta un lotto acquistato con un BUY reale o simulato.
-
-Esempio di slot:
+Struttura principale:
 
 ```text
-slot id:          1
-buy_order_id:     a1015632-8cb0-4f7f-abfd-3f0fd0068954
-base_size_btc:    0.0001534613110309
-cost_eur:         10.0
-buy_fee_eur:      0.118577075098814
-avg_buy_price:    64390.3200000131
-status:           OPEN
-opened_at:        2026-05-27 17:35:08
-```
-
-Quando lo slot viene venduto in futuro, non deve sparire: deve diventare `CLOSED` e conservare i dati di vendita.
-
----
-
-## Tabella `position_slots`
-
-La tabella introdotta per gestire i lotti è:
-
-```sql
-CREATE TABLE IF NOT EXISTS position_slots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    buy_order_id TEXT NOT NULL UNIQUE,
-    buy_client_order_id TEXT NOT NULL,
-    base_size_btc REAL NOT NULL,
-    cost_eur REAL NOT NULL,
-    buy_fee_eur REAL DEFAULT 0,
-    avg_buy_price REAL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'OPEN',
-    opened_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    closed_at TEXT DEFAULT '',
-    sell_order_id TEXT DEFAULT '',
-    sell_net_eur REAL DEFAULT 0,
-    realized_profit_eur REAL DEFAULT 0
-);
-```
-
-Indice:
-
-```sql
-CREATE INDEX IF NOT EXISTS idx_position_slots_status
-ON position_slots(status);
-```
-
-Significato dei campi principali:
-
-| Campo | Significato |
-|---|---|
-| `id` | Identificativo locale dello slot |
-| `buy_order_id` | ID ordine Coinbase del BUY reale |
-| `buy_client_order_id` | Client order id generato da Helix |
-| `base_size_btc` | Quantità BTC acquistata nello slot |
-| `cost_eur` | Costo EUR dello slot |
-| `buy_fee_eur` | Fee stimata/preview del BUY |
-| `avg_buy_price` | Prezzo medio di acquisto |
-| `status` | `OPEN` oppure `CLOSED` |
-| `opened_at` | Data apertura slot |
-| `closed_at` | Data chiusura slot futura |
-| `sell_order_id` | ID ordine Coinbase della SELL futura |
-| `sell_net_eur` | Netto EUR ottenuto dalla SELL |
-| `realized_profit_eur` | Profitto/perdita realizzato |
-
----
-
-## Primo slot reale importato
-
-Il primo BUY reale è stato importato come slot `OPEN`:
-
-```text
-buy_order_id:    a1015632-8cb0-4f7f-abfd-3f0fd0068954
-base_size_btc:   0.0001534613110309
-cost_eur:        10.0
-buy_fee_eur:     0.118577075098814
-avg_buy_price:   64390.3200000131
-status:          OPEN
-opened_at:       2026-05-27 17:35:08
-```
-
-Query di controllo:
-
-```bash
-sqlite3 -header -column data/helix.db \
-"SELECT id,buy_order_id,base_size_btc,cost_eur,buy_fee_eur,avg_buy_price,status,opened_at FROM position_slots;"
-```
-
-Output atteso:
-
-```text
-id  buy_order_id                          base_size_btc       cost_eur  buy_fee_eur        avg_buy_price     status  opened_at
---  ------------------------------------  ------------------  --------  -----------------  ----------------  ------  -------------------
-1   a1015632-8cb0-4f7f-abfd-3f0fd0068954  0.0001534613110309  10.0      0.118577075098814  64390.3200000131  OPEN    2026-05-27 17:35:08
+helix/
+├── Makefile
+├── Makefile.live
+├── build_all.sh
+├── README.md
+├── .env.example
+├── docs/
+│   ├── PRE_PROD_CHECKLIST.md
+│   ├── checklist_prelive.md
+│   ├── release_notes_v0.2.0-prelive.md
+│   └── cleanup_live_candidate_noise.sql
+├── src/
+│   ├── main.c
+│   ├── config/
+│   │   ├── env_loader.c
+│   │   └── env_loader.h
+│   ├── db/
+│   │   ├── database.c
+│   │   └── database.h
+│   ├── engine/
+│   │   ├── engine.c
+│   │   ├── settings.c
+│   │   ├── settings.h
+│   │   ├── order_journal.c
+│   │   ├── order_journal.h
+│   │   ├── post_order_reconciliation.c
+│   │   ├── post_order_reconciliation.h
+│   │   ├── live_execution_lock.c
+│   │   ├── live_execution_lock.h
+│   │   ├── final_live_gate.c
+│   │   ├── final_live_gate.h
+│   │   ├── runtime_safety.c
+│   │   ├── exchange_safety.c
+│   │   ├── operational_limits.c
+│   │   ├── risk_guard.c
+│   │   ├── liquidity_reserve.c
+│   │   ├── volatility_protection.c
+│   │   ├── reconciliation.c
+│   │   ├── anti_duplicate_order.c
+│   │   └── wallet.c
+│   ├── exchange/
+│   │   ├── coinbase_client.c
+│   │   ├── coinbase_client.h
+│   │   ├── coinbase_auth.c
+│   │   ├── coinbase_auth.h
+│   │   ├── order_preview.c
+│   │   ├── order_preview.h
+│   │   ├── order_executor.c
+│   │   └── order_executor.h
+│   ├── market/
+│   │   └── market_data.c
+│   ├── ui/
+│   │   ├── window.c
+│   │   └── window.h
+│   └── wallet/
+│       ├── wallet_info.c
+│       └── wallet_info.h
+└── data/
+    └── helix.db       # locale, non committare
 ```
 
 ---
 
-## BUY reale: regola `quote_size`
+## Build
 
-Per un BUY Coinbase deve ricevere una quantità in EUR, cioè `quote_size`.
-
-Payload corretto:
-
-```json
-{
-  "product_id": "BTC-EUR",
-  "side": "BUY",
-  "order_configuration": {
-    "market_market_ioc": {
-      "quote_size": "10.00",
-      "rfq_disabled": true
-    }
-  }
-}
-```
-
-Errore corretto in precedenza:
-
-```text
-PREVIEW_INVALID_BASE_SIZE_TOO_SMALL
-```
-
-Motivo: Helix stava interpretando/inviando male la quantità. Per un BUY bisogna usare EUR (`quote_size`), non BTC (`base_size`).
-
----
-
-## SELL per slot: regola `base_size`
-
-Per una SELL Coinbase deve ricevere una quantità in BTC, cioè `base_size`.
-
-Payload corretto:
-
-```json
-{
-  "product_id": "BTC-EUR",
-  "side": "SELL",
-  "order_configuration": {
-    "market_market_ioc": {
-      "base_size": "0.00015346",
-      "rfq_disabled": true
-    }
-  }
-}
-```
-
-La quantità BTC deve arrivare dallo slot:
-
-```text
-position_slots.base_size_btc
-```
-
-Non deve arrivare dal wallet totale Coinbase.
-
----
-
-## SELL preview diagnostica
-
-La SELL reale è ancora disabilitata. Attualmente Helix fa solo preview diagnostica.
-
-Flusso attuale:
-
-```text
-1. carica gli slot OPEN
-2. per ogni slot fa SELL preview Coinbase con base_size_btc
-3. calcola gross
-4. calcola fee
-5. calcola net
-6. confronta net con cost_eur
-7. calcola profit EUR
-8. calcola profit %
-9. sceglie lo slot migliore con BEST_PROFIT
-10. se lo slot è in perdita, blocca la SELL
-11. registra nel journal una DRY_RUN_BLOCKED
-```
-
-Ultimo test diagnostico valido:
-
-```text
-id journal:          269
-side:                SELL
-dry_run:             1
-status:              DRY_RUN_BLOCKED
-phase:               PREVIEW
-decision:            SELL_SLOT_NOT_PROFITABLE
-requested_base_size: 0.0001534613110309
-preview_total_eur:   9.5850231333792
-preview_fee_eur:     0.1164172850208
-preview_base_size:   0.00015346
-preview_avg_price:   63218.04
-```
-
-Reason:
-
-```text
-BEST_PROFIT slot #1 scelto | gross 9,59 | fee 0,12 | net 9,47 | cost 10,00 | profit -0,53 EUR -5,31% | SELL reale disabilitata
-```
-
-Risultato corretto:
-
-```text
-Helix non vende perché lo slot è in perdita.
-```
-
----
-
-## Strategia BEST_PROFIT
-
-La prima strategia implementata è `BEST_PROFIT`.
-
-Algoritmo:
-
-```text
-per ogni slot OPEN:
-    fai SELL preview Coinbase usando base_size_btc dello slot
-    calcola gross
-    calcola fee
-    calcola net = gross - fee
-    calcola profit = net - cost_eur
-    calcola profit_percent = profit / cost_eur * 100
-
-scegli lo slot con profitto netto più alto
-
-se:
-    profit >= min_profit_eur
-    profit_percent >= min_profit_percent
-
-allora:
-    slot candidato alla vendita
-
-altrimenti:
-    blocca la SELL
-```
-
-Esempio:
-
-```text
-Slot A: cost 10, net 9.45  -> -0.55  -> bloccato
-Slot B: cost 10, net 10.18 -> +0.18  -> bloccato se min profit è 1 EUR
-Slot C: cost 10, net 11.20 -> +1.20  -> candidato
-```
-
-In futuro, se la SELL reale verrà abilitata, Helix dovrà vendere solo lo Slot C.
-
----
-
-## SELL reale: stato e regole future
-
-La SELL reale è volutamente ancora disabilitata.
-
-Motivi:
-
-```text
-position_slots è appena stata introdotta
-BEST_PROFIT è ancora diagnostico
-serve testare più slot OPEN
-serve modalità paper/sim
-serve UI acknowledge post ordine reale
-serve chiusura slot dopo reconciliation reale
-serve validare bene il journal SELL reale
-```
-
-La SELL reale futura dovrà rispettare questo flusso:
-
-```text
-1. bot in stato sicuro
-2. git pulito
-3. DB con backup
-4. slot OPEN caricato
-5. SELL preview Coinbase fresca
-6. preview senza errs
-7. profit >= soglia minima
-8. final live gate OK
-9. live execution lock OK
-10. create-order SELL con base_size dello slot
-11. journal REAL_SENT
-12. post-order reconciliation
-13. se FILLED/reconciliation OK, chiusura slot
-14. STOP_AFTER_REAL_ORDER
-15. LIVE_TRADING disarmato
-```
-
-La chiusura slot deve avvenire solo dopo conferma reale, non al momento della preview.
-
----
-
-## Riserva
-
-La riserva serve a proteggere capitale.
-
-La riserva non deve essere usata dai BUY normali.
-
-Comportamento desiderato:
-
-```text
-BUY ordinario:
-    usa solo slot ordinari
-    non tocca la riserva
-
-forte calo / crisi:
-    conserva la riserva
-
-recovery dopo forte calo:
-    la riserva può essere usata solo se:
-        - la crisi è stata rilevata
-        - la ripresa è confermata
-        - esiste sblocco manuale
-        - esistono limiti espliciti
-        - esiste audit obbligatorio
-```
-
-Possibili campi futuri:
-
-```text
-slot_type = NORMAL / RESERVE
-reserve_unlock_required = true/false
-reserve_unlock_acknowledged_at
-reserve_reason
-```
-
----
-
-## Modalità operative
-
-Helix deve distinguere chiaramente più modalità.
-
-### SAFE / normale
-
-Build standard:
+Build normale:
 
 ```bash
 make clean
 make
-make run
 ```
 
-La build standard non deve inviare ordini reali.
+Build live candidate:
 
-### LIVE_READONLY / diagnostico
-
-Serve per:
-
-```text
-leggere prezzo
-leggere saldi
-fare preview
-verificare Coinbase API
-controllare journal
-diagnosticare slot
+```bash
+make -f Makefile.live clean
+make -f Makefile.live
 ```
 
-Non deve inviare ordini reali.
+Build completa consigliata:
 
-### LIVE_TRADING / reale
-
-È la modalità più pericolosa.
-
-Può inviare ordini reali solo se passano tutti i gate:
-
-```text
-build live
-runtime mode corretto
-manual arm
-flag .env espliciti
-risk guard
-operational limits
-anti-duplicate
-final live gate
-live execution lock
-post-order reconciliation
+```bash
+./build_all.sh
 ```
 
-### PAPER / SIM futura
+`build_all.sh` esegue:
 
-Da progettare.
-
-La modalità paper/sim dovrà:
-
-```text
-non chiamare mai Coinbase create-order
-simulare BUY
-simulare SELL
-creare slot paper
-chiudere slot paper
-calcolare P/L
-permettere test lunghi senza rischio reale
-separare dati reali da dati simulati
+```bash
+make clean
+make
+make -f Makefile.live clean
+make -f Makefile.live
 ```
 
-Possibile estensione futura:
-
-```text
-position_slots.mode = REAL / PAPER
-```
-
-oppure tabelle separate:
-
-```text
-position_slots
-paper_position_slots
-```
+I binari generati (`helix`, `helix-live`) non devono essere committati.
 
 ---
 
-## `.env`
+## Configurazione ambiente
 
-Il file `.env` non deve essere committato.
+Copiare l'esempio:
 
-Flag principali per ordini reali:
+```bash
+cp .env.example .env
+```
+
+Il file `.env` è locale e non deve essere committato.
+
+Gate globali per ordini reali:
 
 ```env
 HELIX_REAL_TRADING_ENABLED=false
@@ -541,277 +236,62 @@ HELIX_ALLOW_COINBASE_ORDERS=false
 HELIX_I_UNDERSTAND_REAL_MONEY_RISK=false
 ```
 
-Per diagnostica sicura devono restare tutti `false`.
+Gate dedicato per la futura SELL reale slot-based:
 
-Permessi Coinbase consigliati:
-
-```text
-View
-Trade
+```env
+HELIX_ALLOW_REAL_SLOT_SELL=false
 ```
 
-Permessi da non abilitare:
+Durante sviluppo, diagnostica, paper e live-readonly i gate devono restare `false`.
 
-```text
-Transfer
-Receive
+---
+
+## Gate dedicato per SELL reale slot-based
+
+Helix introduce un gate ambiente separato:
+
+```env
+HELIX_ALLOW_REAL_SLOT_SELL=false
 ```
 
-Motivo:
+Questo gate è separato dai tre gate globali di real trading:
+
+```env
+HELIX_REAL_TRADING_ENABLED=false
+HELIX_ALLOW_COINBASE_ORDERS=false
+HELIX_I_UNDERSTAND_REAL_MONEY_RISK=false
+```
+
+Motivo: BUY reale e SELL reale hanno rischi operativi diversi. Una futura abilitazione della BUY reale non deve rendere automaticamente disponibile anche la SELL reale.
+
+Comportamento previsto:
 
 ```text
-View serve per saldo, wallet, preview e stato.
-Trade serve per BUY/SELL.
-Transfer e Receive non servono a Helix e aumentano il rischio.
+HELIX_ALLOW_REAL_SLOT_SELL=false
+    -> SELL reale slot-based bloccata dal gate ambiente
+
+HELIX_ALLOW_REAL_SLOT_SELL=true
+    -> percorso SELL può diventare pronto, ma resta soggetto a tutti gli altri gate,
+       alla preview valida, alla reconciliation e allo stop automatico
+```
+
+Audit attesi quando lo slot sarà profittevole ma la SELL reale resterà bloccata:
+
+```text
+REAL_SLOT_SELL_PLAN
+REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE
+```
+
+Oppure, se il gate è true ma l'esecuzione resta non abilitata:
+
+```text
+REAL_SLOT_SELL_PLAN
+REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED
 ```
 
 ---
 
-## Build
-
-Build normale sicura:
-
-```bash
-make clean
-make
-make run
-```
-
-Build live-candidate:
-
-```bash
-make -f Makefile.live clean
-make -f Makefile.live
-make -f Makefile.live run
-```
-
-`Makefile.live` compila con:
-
-```c
--DHELIX_ENABLE_REAL_COINBASE_ORDERS
-```
-
-Questa macro abilita il codice live, ma non basta per inviare ordini reali: servono anche i flag `.env`, runtime mode, arm manuale e gate.
-
----
-
-## Struttura progetto
-
-Struttura attuale sintetica:
-
-```text
-helix/
-├── .env.example
-├── .gitignore
-├── Makefile
-├── Makefile.live
-├── README.md
-├── VERSION
-├── docs/
-│   ├── checklist_prelive.md
-│   ├── cleanup_live_candidate_noise.sql
-│   └── release_notes_v0.2.0-prelive.md
-└── src/
-    ├── main.c
-    ├── config/
-    │   ├── env_loader.c
-    │   └── env_loader.h
-    ├── db/
-    │   ├── database.c
-    │   └── database.h
-    ├── engine/
-    │   ├── anti_duplicate_order.c
-    │   ├── anti_duplicate_order.h
-    │   ├── api_health.c
-    │   ├── api_health.h
-    │   ├── bot_state.c
-    │   ├── bot_state.h
-    │   ├── emergency_stop.c
-    │   ├── emergency_stop.h
-    │   ├── engine.c
-    │   ├── engine.h
-    │   ├── exchange_safety.c
-    │   ├── exchange_safety.h
-    │   ├── final_live_gate.c
-    │   ├── final_live_gate.h
-    │   ├── liquidity_reserve.c
-    │   ├── liquidity_reserve.h
-    │   ├── live_execution_lock.c
-    │   ├── live_execution_lock.h
-    │   ├── live_readiness.c
-    │   ├── live_readiness.h
-    │   ├── operational_limits.c
-    │   ├── operational_limits.h
-    │   ├── order_journal.c
-    │   ├── order_journal.h
-    │   ├── order_state_recovery.c
-    │   ├── order_state_recovery.h
-    │   ├── post_order_reconciliation.c
-    │   ├── post_order_reconciliation.h
-    │   ├── prelive_validation.c
-    │   ├── prelive_validation.h
-    │   ├── reconciliation.c
-    │   ├── reconciliation.h
-    │   ├── risk_guard.c
-    │   ├── risk_guard.h
-    │   ├── runtime_safety.c
-    │   ├── runtime_safety.h
-    │   ├── settings.c
-    │   ├── settings.h
-    │   ├── trade_preview.c
-    │   ├── trade_preview.h
-    │   ├── volatility_protection.c
-    │   ├── volatility_protection.h
-    │   ├── wallet.c
-    │   └── wallet.h
-    ├── exchange/
-    │   ├── coinbase_auth.c
-    │   ├── coinbase_auth.h
-    │   ├── coinbase_client.c
-    │   ├── coinbase_client.h
-    │   ├── order_executor.c
-    │   ├── order_executor.h
-    │   ├── order_preview.c
-    │   └── order_preview.h
-    ├── market/
-    │   ├── market_data.c
-    │   └── market_data.h
-    ├── ui/
-    │   ├── window.c
-    │   └── window.h
-    └── wallet/
-        ├── wallet_info.c
-        └── wallet_info.h
-```
-
----
-
-## Ruolo dei file principali
-
-### `src/main.c`
-
-Entry point dell'applicazione. Inizializza il contesto principale e avvia la UI GTK4.
-
-### `src/ui/window.c`
-
-Gestisce la finestra GTK4, i controlli utente e la visualizzazione dello stato del bot.
-
-Qui dovrà essere aggiunto in futuro il pulsante:
-
-```text
-Acknowledge last real order
-```
-
-### `src/engine/engine.c`
-
-Cuore del ciclo operativo.
-
-Responsabilità:
-
-```text
-leggere stato runtime
-leggere saldi/prezzi
-valutare BUY/SELL
-rispettare cooldown e limiti
-chiamare preview Coinbase
-valutare slot OPEN
-scegliere BEST_PROFIT
-bloccare SELL non profittevoli
-non inviare SELL reali in questa fase
-```
-
-### `src/db/database.c` / `database.h`
-
-Gestione SQLite.
-
-Contiene:
-
-```text
-bot_state
-settings
-engine_audit
-order_journal
-order_state
-trades
-position_slots
-```
-
-Funzioni slot principali:
-
-```c
-int db_create_position_slot_from_buy(...);
-int db_rebuild_position_slots_from_real_buys(void);
-int db_get_open_position_slots(...);
-int db_close_position_slot(...);
-```
-
-### `src/engine/order_journal.c` / `order_journal.h`
-
-Journal degli ordini.
-
-Registra:
-
-```text
-dry-run
-preview
-pre-execution
-real execution
-post-order reconciliation
-rejected/blocked states
-```
-
-Dopo un BUY reale accettato, il sistema deve poter creare o ricostruire lo slot OPEN.
-
-### `src/exchange/order_preview.c`
-
-Gestisce preview Coinbase.
-
-Regole fondamentali:
-
-```text
-BUY  -> quote_size EUR
-SELL -> base_size BTC
-```
-
-### `src/exchange/order_executor.c`
-
-Gestisce create-order Coinbase.
-
-È codice pericoloso: deve essere invocato solo dopo tutti i gate.
-
-### `src/engine/risk_guard.c`
-
-Controlli di rischio.
-
-### `src/engine/runtime_safety.c`
-
-Sicurezza runtime, modalità operative, blocchi di protezione.
-
-### `src/engine/operational_limits.c`
-
-Limiti giornalieri, cooldown, prevenzione operatività eccessiva.
-
-### `src/engine/anti_duplicate_order.c`
-
-Previene duplicati ravvicinati.
-
-### `src/engine/final_live_gate.c`
-
-Gate finale prima di consentire un ordine reale.
-
-### `src/engine/live_execution_lock.c`
-
-Ultimo lock prima della chiamata create-order.
-
-### `src/engine/post_order_reconciliation.c`
-
-Riconciliazione dopo ordine reale.
-
-Deve verificare che l'ordine accettato da Coinbase sia effettivamente nello stato previsto.
-
----
-
-## Database locale
+## Database SQLite
 
 Database locale:
 
@@ -819,460 +299,404 @@ Database locale:
 data/helix.db
 ```
 
-Non va committato.
+Il database non deve essere committato.
 
-File da non committare:
-
-```text
-.env
-data/
-helix
-helix-live
-*.db
-*.db-wal
-*.db-shm
-coinbase_*_last.json
-log personali
-backup locali
-```
-
-Controllare `.gitignore` prima di ogni commit.
-
----
-
-## Query utili SQLite
-
-Tabelle:
-
-```bash
-sqlite3 data/helix.db ".tables"
-```
-
-Schema slot:
-
-```bash
-sqlite3 data/helix.db ".schema position_slots"
-```
-
-Slot aperti:
-
-```bash
-sqlite3 -header -column data/helix.db \
-"SELECT id,buy_order_id,base_size_btc,cost_eur,buy_fee_eur,avg_buy_price,status,opened_at FROM position_slots WHERE status='OPEN';"
-```
-
-Ultimi ordini:
-
-```bash
-sqlite3 -header -column data/helix.db \
-"SELECT id,client_order_id,side,dry_run,status,phase,decision,requested_base_size,preview_total_eur,preview_fee_eur,preview_base_size,preview_avg_price,reason,created_at FROM order_journal ORDER BY id DESC LIMIT 10;"
-```
-
-Audit SELL/slot:
-
-```bash
-sqlite3 -header -column data/helix.db \
-"SELECT created_at,event_type,decision,reason,btc_amount,eur_amount,estimated_fee,net_profit FROM engine_audit WHERE event_type LIKE '%SELL%' OR event_type LIKE '%POSITION%' ORDER BY id DESC LIMIT 30;"
-```
-
-BUY reali importabili come slot:
-
-```bash
-sqlite3 -header -column data/helix.db \
-"SELECT coinbase_order_id, client_order_id, preview_base_size, CASE WHEN requested_quote_size > 0 THEN requested_quote_size ELSE preview_total_eur END AS cost_eur, preview_fee_eur, preview_avg_price FROM order_journal WHERE side = 'BUY' AND dry_run = 0 AND status = 'REAL_SENT' AND phase = 'REAL_EXECUTION' AND decision = 'SENT' AND coinbase_order_id <> '' AND preview_base_size > 0 ORDER BY id ASC;"
-```
-
----
-
-## Journal ordini
-
-La tabella `order_journal` registra le decisioni di Helix.
-
-Campi importanti:
+Tabelle principali:
 
 ```text
-client_order_id
-side
-product_id
-dry_run
+settings
+bot_state
+trades
+engine_audit
+order_state
+order_journal
+position_slots
+paper_position_slots
+```
+
+### `position_slots`
+
+Contiene gli slot reali derivati da BUY reali Coinbase.
+
+Campi principali:
+
+```text
+id
+buy_order_id
+buy_client_order_id
+base_size_btc
+cost_eur
+buy_fee_eur
+avg_buy_price
 status
-phase
-decision
-requested_quote_size
-requested_base_size
-preview_total_eur
-preview_fee_eur
-preview_base_size
-preview_avg_price
-reason
-http_code
-coinbase_order_id
-execution_decision
-execution_reason
-executed_at
+opened_at
+closed_at
+sell_order_id
+sell_net_eur
+realized_profit_eur
 ```
 
-Esempi di stati:
+Stati principali:
 
 ```text
-DRY_RUN_READY
-DRY_RUN_BLOCKED
-REAL_PLAN_READY
-REAL_SENT
-REAL_REJECTED
-POST_ORDER_RECON_OK
+OPEN
+CLOSED
 ```
 
-Esempi di decisioni:
+Uno slot reale può essere chiuso solo dopo futura SELL reale riconciliata correttamente.
+
+### `paper_position_slots`
+
+Contiene slot fittizi usati solo per PAPER/SIM.
+
+Non deve mai essere mischiata con `position_slots` reale.
+
+---
+
+## Flusso BUY reale micro
+
+Flusso validato:
 
 ```text
-FINAL_GATE_OK
-ANTI_DUPLICATE_BLOCKED
+1. BUY preview Coinbase
+2. exchange safety
+3. runtime safety
+4. final live gate
+5. live execution lock
+6. create-order Coinbase
+7. order_journal REAL_SENT
+8. post-order reconciliation
+9. POST_ORDER_RECON_OK
+10. creazione position_slots OPEN
+11. STOP_AFTER_REAL_ORDER
+12. acknowledge manuale
+```
+
+Il primo BUY reale micro è stato completato e riconciliato con successo.
+
+---
+
+## Flusso SELL preview per slot
+
+Helix non valuta più la vendita dell'intero wallet BTC.
+
+Flusso diagnostico attuale:
+
+```text
+1. legge position_slots OPEN
+2. per ogni slot calcola preview SELL Coinbase
+3. calcola gross, fee, net, cost, profit EUR, profit %
+4. sceglie lo slot migliore con BEST_PROFIT
+5. se lo slot non è profittevole blocca
+6. se lo slot è profittevole prepara audit/piano bloccato
+7. non invia SELL reale
+```
+
+Decisioni tipiche:
+
+```text
+SELL_SLOT_PREVIEW_EVALUATED
+BEST_PROFIT_NOT_PROFITABLE
 SELL_SLOT_NOT_PROFITABLE
-SELL_CANDIDATE_BLOCKED
-POST_ORDER_RECON_OK
+REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE
+REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED
 ```
 
 ---
 
-## Audit engine
+## PAPER/SIM
 
-La tabella `engine_audit` usa colonne:
+PAPER/SIM è isolato dalla parte reale.
+
+Pulsanti UI:
 
 ```text
-event_type
-decision
-reason
-price
-btc_amount
-eur_amount
-estimated_fee
-net_profit
-created_at
+Seed paper slots demo
+Clear paper slots
+Run paper BEST_PROFIT
 ```
 
-Nota: la colonna si chiama `event_type`, non `event`.
+`Seed paper slots demo` crea tre slot paper dimostrativi:
 
-Query corretta:
+```text
+paper-slot-a
+paper-slot-b
+paper-slot-c
+```
 
-```bash
-sqlite3 -header -column data/helix.db \
-"SELECT created_at,event_type,decision,reason,btc_amount,eur_amount,estimated_fee,net_profit FROM engine_audit ORDER BY id DESC LIMIT 30;"
+`Run paper BEST_PROFIT`:
+
+```text
+valuta tutti gli slot paper OPEN
+calcola gross, fee, net, profit EUR, profit %
+sceglie lo slot migliore
+chiude lo slot paper se supera le soglie
+scrive audit PAPER_SIM
+```
+
+Test validato:
+
+```text
+paper-slot-c scelto come migliore
+paper-slot-c chiuso come CLOSED
+realized_profit_eur valorizzato
 ```
 
 ---
 
-## Stop after real order
+## Reconciliation SELL e chiusura slot
 
-Dopo un ordine reale, Helix deve:
+Il groundwork per la futura SELL reale riconciliata è stato preparato.
+
+Flusso desiderato per una futura SELL reale:
 
 ```text
-fermare il bot
-disarmare LIVE_TRADING
-impedire nuovi ordini reali
-richiedere revisione manuale
+1. SELL reale inviata solo su slot scelto
+2. Coinbase restituisce order_id
+3. order_journal registra REAL_SENT
+4. post_order_reconciliation legge stato ordine
+5. accetta solo FILLED / SETTLED / DONE / completion 100%
+6. legge wallet Coinbase
+7. trova slot OPEN compatibile con requested_base_size
+8. calcola sell_net_eur = preview_total_eur - preview_fee_eur
+9. calcola realized_profit_eur = sell_net_eur - cost_eur
+10. chiude position_slots con db_close_position_slot(...)
+11. scrive audit SLOT_CLOSE_RECONCILIATION
+12. STOP_AFTER_REAL_ORDER
+13. acknowledge manuale
 ```
 
-È stato introdotto il setting:
+Audit previsto:
+
+```text
+SLOT_CLOSE_RECONCILIATION
+SLOT_CLOSED_AFTER_SELL_RECON
+```
+
+Questa logica è preparatoria: la SELL reale resta ancora disabilitata finché non viene completato il percorso live controllato.
+
+---
+
+## Acknowledge ordine reale
+
+Dopo un ordine reale Helix richiede acknowledgement manuale.
+
+Impostazione usata:
 
 ```text
 micro_live.last_real_order_acknowledged
 ```
 
-Obiettivo:
+La UI contiene il controllo:
 
 ```text
-se ultimo ordine reale non è acknowledged:
-    bloccare LIVE_TRADING
-
-se runtime è LIVE_READONLY:
-    permettere diagnostica
+Acknowledge ultimo ordine reale
 ```
 
-Da fare:
+L'acknowledge serve a impedire che Helix prosegua dopo un ordine reale senza revisione umana.
+
+---
+
+## Safety gates principali
+
+Helix usa più livelli di blocco:
 
 ```text
-aggiungere pulsante UI: Acknowledge last real order
-mostrare ultimo order id reale
-salvare acknowledge in settings
-loggare audit dell'acknowledge
+runtime_mode
+emergency_stop
+live_trading_armed
+micro_live_enabled
+micro_live_max_order_eur
+max_orders_per_day
+order_cooldown_seconds
+liquidity_reserve_percent
+micro_live_stop_after_real_order
+HELIX_REAL_TRADING_ENABLED
+HELIX_ALLOW_COINBASE_ORDERS
+HELIX_I_UNDERSTAND_REAL_MONEY_RISK
+HELIX_ALLOW_REAL_SLOT_SELL
+HELIX_ENABLE_REAL_COINBASE_ORDERS
+final_live_gate
+live_execution_lock
+post_order_reconciliation
+```
+
+Per micro-live controllato:
+
+```text
+max_orders_per_day = 1
+micro_live_stop_after_real_order = 1
+liquidity_reserve_percent >= 80
+micro_live_max_order_eur <= 10 consigliato
 ```
 
 ---
 
-## Sicurezza Coinbase
+## Checklist pre-produzione
 
-Prima di qualsiasi test reale:
+Documento dedicato:
 
 ```text
-bot fermo
+docs/PRE_PROD_CHECKLIST.md
+```
+
+Prima di qualunque test reale:
+
+```text
 git status pulito
-backup DB creato
-.env controllato
-LIVE_TRADING armato solo manualmente
-importo minimo
-saldo e wallet controllati
-permessi Coinbase limitati a View/Trade
-nessun Transfer/Receive
-STOP_AFTER_REAL_ORDER attivo
-journal controllato dopo ordine
-reconciliation controllata
+build_all.sh senza warning
+backup data/helix.db
+.env verificato
+HELIX_ALLOW_REAL_SLOT_SELL=false
+STOP_AFTER_REAL_ORDER=1
+max_orders_per_day=1
+micro_live_max_order_eur <= 10
+liquidity_reserve_percent >= 80
+position_slots controllata
+order_journal controllato
+engine_audit controllato
 ```
 
 ---
 
-## Procedura diagnostica slot SELL
+## Comandi utili
 
-1. Compilare:
-
-```bash
-make clean
-make
-make -f Makefile.live clean
-make -f Makefile.live
-```
-
-2. Verificare `.env`:
+Build completa:
 
 ```bash
-grep -E "HELIX_REAL_TRADING_ENABLED|HELIX_ALLOW_COINBASE_ORDERS|HELIX_I_UNDERSTAND_REAL_MONEY_RISK" .env
+./build_all.sh
 ```
 
-Valori attesi:
-
-```env
-HELIX_REAL_TRADING_ENABLED=false
-HELIX_ALLOW_COINBASE_ORDERS=false
-HELIX_I_UNDERSTAND_REAL_MONEY_RISK=false
-```
-
-3. Avviare:
-
-```bash
-make -f Makefile.live run
-```
-
-4. Fare Bot Start solo in diagnostica.
-
-5. Non armare LIVE_TRADING.
-
-6. Aspettare un ciclo.
-
-7. Fermare il bot.
-
-8. Controllare journal:
-
-```bash
-sqlite3 -header -column data/helix.db \
-"SELECT id,client_order_id,side,dry_run,status,phase,decision,requested_base_size,preview_total_eur,preview_fee_eur,preview_base_size,preview_avg_price,reason,created_at FROM order_journal ORDER BY id DESC LIMIT 5;"
-```
-
-Risultato buono attuale:
-
-```text
-SELL_SLOT_NOT_PROFITABLE
-```
-
-Questo significa che Helix ha valutato lo slot e ha deciso correttamente di non vendere.
-
----
-
-## Workflow Git consigliato
-
-Controllo stato:
+Stato Git:
 
 ```bash
 git status
-git diff --stat
+git log --oneline -8
+git tag --list "v0.2.*"
 ```
 
-Aggiunta file sorgente:
+Backup DB:
 
 ```bash
-git add \
-  README.md \
-  src/db/database.c \
-  src/db/database.h \
-  src/engine/engine.c \
-  src/engine/order_journal.c \
-  src/engine/order_journal.h \
-  src/engine/settings.c \
-  src/engine/settings.h
+mkdir -p data/backups
+cp data/helix.db "data/backups/helix_backup_$(date +%Y%m%d_%H%M%S).db"
 ```
 
-Controllo staged:
+Controllo slot reali:
 
 ```bash
-git diff --stat --cached
+sqlite3 -header -column data/helix.db "
+SELECT id,buy_order_id,buy_client_order_id,base_size_btc,cost_eur,buy_fee_eur,
+       avg_buy_price,status,opened_at,closed_at,sell_order_id,
+       sell_net_eur,realized_profit_eur
+FROM position_slots
+ORDER BY id;
+"
 ```
 
-Commit consigliato:
+Controllo ultimi ordini:
 
 ```bash
-git commit -m "feat: add slot-based position tracking and sell preview"
+sqlite3 -header -column data/helix.db "
+SELECT id,client_order_id,side,dry_run,status,phase,decision,
+       requested_base_size,preview_total_eur,preview_fee_eur,
+       preview_base_size,preview_avg_price,reason,created_at
+FROM order_journal
+ORDER BY id DESC
+LIMIT 20;
+"
 ```
 
-Push:
+Controllo audit SELL:
 
 ```bash
-git push
-```
-
-Tag possibile:
-
-```bash
-git tag v0.2.1-slot-preview
-git push origin v0.2.1-slot-preview
+sqlite3 -header -column data/helix.db "
+SELECT created_at,event_type,decision,reason,eur_amount,estimated_fee,net_profit
+FROM engine_audit
+WHERE event_type IN ('SELL_SLOT_SELECTION','REAL_SLOT_SELL_PLAN','EXCHANGE_SAFETY_SELL','SLOT_CLOSE_RECONCILIATION')
+ORDER BY id DESC
+LIMIT 30;
+"
 ```
 
 ---
 
-## Roadmap immediata
+## Creazione ZIP sicuro
 
-Priorità:
+Non includere mai `.env`, `data/`, `.git/` o binari.
 
-```text
-1. committare patch slot/lotti diagnostica
-2. aggiornare README
-3. aggiungere UI acknowledge ultimo ordine reale
-4. migliorare audit della rebuild position_slots
-5. progettare modalità paper/sim
-6. testare più slot OPEN
-7. simulare BEST_PROFIT con più slot
-8. definire soglie min_profit_eur e min_profit_percent configurabili
-9. progettare chiusura slot dopo SELL reale riconciliata
-10. solo molto più avanti: abilitare SELL reale slot-based
+Comando consigliato:
+
+```bash
+zip -r "../helix_state_$(date +%Y%m%d_%H%M%S).zip" . \
+  -x ".git/*" \
+  -x "data/*" \
+  -x ".env" \
+  -x "helix" \
+  -x "helix-live" \
+  -x "*.o" \
+  -x "*~"
 ```
 
 ---
 
-## Roadmap paper/sim
+## Roadmap verso produzione controllata
 
-La modalità paper/sim dovrà essere progettata in modo da non poter inviare ordini reali neanche per errore.
-
-Possibili regole:
+### v0.2.5
 
 ```text
-runtime PAPER ignora create-order reale
-usa solo prezzo corrente/preview locale
-crea slot PAPER
-chiude slot PAPER
-non mischia slot REAL e PAPER
-journal separa PAPER da REAL
-UI mostra chiaramente PAPER MODE
+pre-produzione documentata
+SELL reale ancora disabilitata
+checklist pronta
 ```
 
-Possibile schema futuro:
+### v0.3.0-rc1
+
+Obiettivo:
 
 ```text
-position_slots.mode = REAL / PAPER
-position_slots.source = COINBASE / SIMULATED
+SELL reale slot-based riconciliata in modo controllato
 ```
-
-Oppure:
-
-```text
-paper_slots
-paper_order_journal
-```
-
-La soluzione va scelta prima di implementare.
-
----
-
-## Roadmap UI acknowledge
-
-Da aggiungere in `src/ui/window.c`:
-
-```text
-se esiste ultimo ordine reale non acknowledged:
-    mostra warning
-    disabilita LIVE_TRADING
-    abilita bottone "Acknowledge last real order"
-
-click bottone:
-    mostra ultimo order id
-    richiede conferma
-    salva micro_live.last_real_order_acknowledged = order id
-    scrive engine_audit
-```
-
-Questo evita di modificare SQLite a mano.
-
----
-
-## Roadmap SELL reale slot-based
-
-La SELL reale non va abilitata ora.
-
-Quando sarà il momento, dovrà essere introdotta con una milestone dedicata.
 
 Requisiti minimi:
 
 ```text
-almeno 2-3 run diagnostici stabili
-più slot OPEN simulati o paper
-BEST_PROFIT validato
-soglie configurabili
-preview Coinbase fresca immediatamente prima della SELL
-SELL reale con base_size dello slot
-post-order reconciliation SELL
-chiusura slot solo dopo FILLED
-STOP_AFTER_REAL_ORDER dopo SELL
-report finale
+SELL solo su slot OPEN
+Coinbase preview immediata valida
+HELIX_ALLOW_REAL_SLOT_SELL=true solo per test controllato
+ordine micro
+POST_ORDER_RECON_OK
+slot CLOSED solo dopo FILLED
+STOP_AFTER_REAL_ORDER
+acknowledge manuale
+```
+
+### v0.3.0
+
+Prima produzione controllata:
+
+```text
+un ordine reale alla volta
+micro importi
+supervisione umana
+nessun ciclo autonomo continuo
+nessuna vendita wallet totale
 ```
 
 ---
 
-## Regola d'oro
+## Regola finale
 
-Helix deve sempre preferire:
-
-```text
-non fare nulla
-```
-
-rispetto a:
+Helix può diventare produttivo solo quando ogni passaggio reale è:
 
 ```text
-fare un ordine ambiguo
+esplicito
+piccolo
+tracciato
+riconciliato
+reversibile operativamente
+fermato dopo esecuzione
+confermato manualmente dall'utente
 ```
 
-Una BUY o una SELL deve partire solo quando:
-
-```text
-il codice sa cosa sta facendo
-il database lo rappresenta correttamente
-Coinbase preview è valida
-i gate sono tutti verdi
-l'utente ha armato manualmente
-il rischio è piccolo
-il sistema può fermarsi e riconciliare
-```
-
----
-
-## Stato finale di questa milestone
-
-La milestone slot preview è positiva perché:
-
-```text
-Helix ha uno slot reale OPEN
-Helix valuta SELL sullo slot, non sul wallet intero
-Helix calcola profitto netto dopo fee
-Helix sceglie BEST_PROFIT
-Helix blocca lo slot in perdita
-Helix non manda ordini reali
-```
-
-Questo è il comportamento corretto.
-
-
----
-
-## Gate dedicato per SELL reale slot-based
-
-Dalla fase successiva a `v0.2.2-paper-best-profit`, Helix introduce un gate ambiente dedicato alla futura SELL reale per slot:
-
-```env
-HELIX_ALLOW_REAL_SLOT_SELL=false
+Fino ad allora, Helix resta una release tecnica/pre-prod controllata.
