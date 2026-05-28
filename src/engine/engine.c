@@ -45,6 +45,22 @@ static int execute_live_order_plan(
     StrategySettings *settings
 );
 
+
+static int env_allows_real_slot_sell(void) {
+    const char *value = getenv("HELIX_ALLOW_REAL_SLOT_SELL");
+
+    if (value == NULL) {
+        return 0;
+    }
+
+    return
+        strcmp(value, "true") == 0 ||
+        strcmp(value, "TRUE") == 0 ||
+        strcmp(value, "1") == 0 ||
+        strcmp(value, "yes") == 0 ||
+        strcmp(value, "YES") == 0;
+}
+
 static int can_override_risk_guard_for_micro_buy(
     const BotState *state,
     const StrategySettings *settings,
@@ -1042,12 +1058,13 @@ static void audit_coinbase_order_preview_if_needed(
                 );
 
                 if (sell_profitable) {
-                    char real_plan_reason[360];
+                    char real_plan_reason[420];
+                    int real_slot_sell_env_allowed = env_allows_real_slot_sell();
 
                     snprintf(
                         real_plan_reason,
                         sizeof(real_plan_reason),
-                        "REAL SELL slot-based plan pronto ma bloccato | slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%% | create-order SELL reale disabilitato",
+                        "REAL SELL slot-based plan pronto ma bloccato | slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%% | HELIX_ALLOW_REAL_SLOT_SELL=%s | create-order SELL reale non eseguito",
                         best_slot->id,
                         best_slot->base_size_btc,
                         best_gross,
@@ -1055,12 +1072,15 @@ static void audit_coinbase_order_preview_if_needed(
                         best_net,
                         best_slot->cost_eur,
                         best_profit,
-                        best_profit_percent
+                        best_profit_percent,
+                        real_slot_sell_env_allowed ? "true" : "false"
                     );
 
                     audit_engine_decision(
                         "REAL_SLOT_SELL_PLAN",
-                        "REAL_SLOT_SELL_PLAN_BLOCKED",
+                        real_slot_sell_env_allowed ?
+                            "REAL_SLOT_SELL_BLOCKED_BY_IMPLEMENTATION" :
+                            "REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE",
                         real_plan_reason,
                         state->current_price,
                         best_slot->base_size_btc,
@@ -1071,7 +1091,9 @@ static void audit_coinbase_order_preview_if_needed(
 
                     record_blocked_preview_candidate(
                         best_plan,
-                        "REAL_SLOT_SELL_PLAN_BLOCKED",
+                        real_slot_sell_env_allowed ?
+                            "REAL_SLOT_SELL_BLOCKED_BY_IMPLEMENTATION" :
+                            "REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE",
                         real_plan_reason
                     );
                 } else {
