@@ -1267,3 +1267,12 @@ Helix non manda ordini reali
 
 Questo è il comportamento corretto.
 
+
+---
+
+## Gate dedicato per SELL reale slot-based
+
+Dalla fase successiva a `v0.2.2-paper-best-profit`, Helix introduce un gate ambiente dedicato alla futura SELL reale per slot:
+
+```env
+HELIX_ALLOW_REAL_SLOT_SELL=false
