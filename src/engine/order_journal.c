@@ -563,7 +563,9 @@ int order_journal_get_latest_unreconciled_real_order(
     }
 
     const char *sql =
-        "SELECT client_order_id, coinbase_order_id, side, product_id, status, created_at "
+        "SELECT client_order_id, coinbase_order_id, side, product_id, status, created_at, "
+        "       requested_quote_size, requested_base_size, preview_total_eur, "
+        "       preview_fee_eur, preview_base_size, preview_avg_price "
         "FROM order_journal oj "
         "WHERE status = 'REAL_SENT' "
         "  AND NOT EXISTS ("
@@ -590,6 +592,13 @@ int order_journal_get_latest_unreconciled_real_order(
             snprintf(record->product_id, sizeof(record->product_id), "%s", product_id ? (const char *)product_id : "BTC-EUR");
             snprintf(record->status, sizeof(record->status), "%s", status ? (const char *)status : "");
             snprintf(record->created_at, sizeof(record->created_at), "%s", created_at ? (const char *)created_at : "");
+
+            record->requested_quote_size = sqlite3_column_double(stmt, 6);
+            record->requested_base_size = sqlite3_column_double(stmt, 7);
+            record->preview_total_eur = sqlite3_column_double(stmt, 8);
+            record->preview_fee_eur = sqlite3_column_double(stmt, 9);
+            record->preview_base_size = sqlite3_column_double(stmt, 10);
+            record->preview_avg_price = sqlite3_column_double(stmt, 11);
         }
     }
 

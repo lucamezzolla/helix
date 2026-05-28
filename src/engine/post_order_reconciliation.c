@@ -2,6 +2,7 @@
 #include "order_journal.h"
 #include "../exchange/coinbase_client.h"
 #include "../wallet/wallet_info.h"
+#include "../db/database.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -251,6 +252,74 @@ PostOrderReconciliationCheck post_order_reconciliation_check_latest_real_order(
         wallet.btc_balance,
         position_summary.fill_count
     );
+
+    if (strcmp(record.side, "SELL") == 0) {
+        PositionSlotRecord slot;
+        double sell_net_eur = record.preview_total_eur - record.preview_fee_eur;
+        double realized_profit_eur = 0.0;
+
+        if (
+            record.requested_base_size > 0.0 &&
+            sell_net_eur > 0.0 &&
+            db_find_open_position_slot_by_base_size(record.requested_base_size, &slot)
+        ) {
+            realized_profit_eur = sell_net_eur - slot.cost_eur;
+
+            if (db_close_position_slot(
+                slot.id,
+                record.coinbase_order_id,
+                sell_net_eur,
+                realized_profit_eur
+            )) {
+                char slot_reason[320];
+
+                snprintf(
+                    slot_reason,
+                    sizeof(slot_reason),
+                    "Slot reale chiuso dopo SELL reconciliation OK | slot #%d | sell order %.80s | base %.8f | net %.2f | cost %.2f | profit %.2f",
+                    slot.id,
+                    record.coinbase_order_id,
+                    record.requested_base_size,
+                    sell_net_eur,
+                    slot.cost_eur,
+                    realized_profit_eur
+                );
+
+                db_log_engine_audit(
+                    "SLOT_CLOSE_RECONCILIATION",
+                    "SLOT_CLOSED_AFTER_SELL_RECON",
+                    slot_reason,
+                    state ? state->current_price : 0.0,
+                    record.requested_base_size,
+                    sell_net_eur,
+                    record.preview_fee_eur,
+                    realized_profit_eur
+                );
+            } else {
+                db_log_engine_audit(
+                    "SLOT_CLOSE_RECONCILIATION",
+                    "SLOT_CLOSE_FAILED_AFTER_SELL_RECON",
+                    "SELL reconciliation OK ma chiusura slot reale fallita",
+                    state ? state->current_price : 0.0,
+                    record.requested_base_size,
+                    sell_net_eur,
+                    record.preview_fee_eur,
+                    realized_profit_eur
+                );
+            }
+        } else {
+            db_log_engine_audit(
+                "SLOT_CLOSE_RECONCILIATION",
+                "SLOT_CLOSE_SKIPPED_NO_MATCHING_SLOT",
+                "SELL reconciliation OK ma nessuno slot OPEN compatibile trovato",
+                state ? state->current_price : 0.0,
+                record.requested_base_size,
+                sell_net_eur,
+                record.preview_fee_eur,
+                0.0
+            );
+        }
+    }
 
     PostOrderReconciliationCheck check = make_check(
         1,

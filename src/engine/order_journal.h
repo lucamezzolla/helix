@@ -14,6 +14,12 @@ typedef struct {
     char product_id[32];
     char status[32];
     char created_at[32];
+    double requested_quote_size;
+    double requested_base_size;
+    double preview_total_eur;
+    double preview_fee_eur;
+    double preview_base_size;
+    double preview_avg_price;
 } RealOrderJournalRecord;
 
 
