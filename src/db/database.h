@@ -46,6 +46,47 @@ typedef struct {
 } EngineAuditRecord;
 
 
+
+
+typedef struct {
+    int id;
+    char buy_order_id[128];
+    char buy_client_order_id[96];
+    double base_size_btc;
+    double cost_eur;
+    double buy_fee_eur;
+    double avg_buy_price;
+    char status[16];
+    char opened_at[32];
+    char closed_at[32];
+    char sell_order_id[128];
+    double sell_net_eur;
+    double realized_profit_eur;
+} PositionSlotRecord;
+
+int db_create_position_slot_from_buy(
+    const char *buy_order_id,
+    const char *buy_client_order_id,
+    double base_size_btc,
+    double cost_eur,
+    double buy_fee_eur,
+    double avg_buy_price
+);
+
+int db_rebuild_position_slots_from_real_buys(void);
+
+int db_get_open_position_slots(
+    PositionSlotRecord *records,
+    int max_records
+);
+
+int db_close_position_slot(
+    int slot_id,
+    const char *sell_order_id,
+    double sell_net_eur,
+    double realized_profit_eur
+);
+
 typedef struct {
     int total_last_days;
     int reconciliation_blocks;

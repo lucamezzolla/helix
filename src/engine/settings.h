@@ -31,6 +31,7 @@ typedef struct {
     double micro_live_max_order_eur;
     int micro_live_stop_after_real_order;
     int micro_live_allow_accumulation;
+    char micro_live_last_real_order_acknowledged[128];
     RuntimeMode runtime_mode;
 } StrategySettings;
 

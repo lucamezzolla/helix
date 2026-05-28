@@ -54,6 +54,7 @@ static double parse_double_setting(const char *value, double fallback) {
 #define KEY_MICRO_LIVE_MAX_ORDER_EUR "micro_live.max_order_eur"
 #define KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER "micro_live.stop_after_real_order"
 #define KEY_MICRO_LIVE_ALLOW_ACCUMULATION "micro_live.allow_accumulation"
+#define KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED "micro_live.last_real_order_acknowledged"
 #define KEY_RUNTIME_MODE "runtime.mode"
 
 static double get_double_setting(const char *key, double fallback) {
@@ -74,6 +75,20 @@ static int get_int_setting(const char *key, int fallback) {
     }
 
     return atoi(buffer);
+}
+
+static void get_string_setting(const char *key, char *buffer, int buffer_size, const char *fallback) {
+    if (buffer == NULL || buffer_size <= 0) {
+        return;
+    }
+
+    if (!db_get_setting(key, buffer, buffer_size)) {
+        snprintf(buffer, (size_t)buffer_size, "%s", fallback ? fallback : "");
+    }
+}
+
+static void set_string_setting(const char *key, const char *value) {
+    db_set_setting(key, value ? value : "");
 }
 
 static void set_double_setting(const char *key, double value) {
@@ -159,6 +174,7 @@ StrategySettings settings_default(void) {
     settings.micro_live_max_order_eur = 20.0;
     settings.micro_live_stop_after_real_order = 1;
     settings.micro_live_allow_accumulation = 0;
+    settings.micro_live_last_real_order_acknowledged[0] = '\0';
     settings.runtime_mode = RUNTIME_MODE_SIMULATION;
 
     return settings;
@@ -188,6 +204,7 @@ void settings_save(StrategySettings *settings) {
     set_double_setting(KEY_MICRO_LIVE_MAX_ORDER_EUR, settings->micro_live_max_order_eur);
     set_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, settings->micro_live_stop_after_real_order ? 1 : 0);
     set_int_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, settings->micro_live_allow_accumulation ? 1 : 0);
+    set_string_setting(KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED, settings->micro_live_last_real_order_acknowledged);
     set_runtime_mode_setting(settings->runtime_mode);
 }
 
@@ -285,6 +302,10 @@ void settings_save_defaults_if_missing(void) {
 
     if (!db_get_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, buffer, sizeof(buffer))) {
         set_int_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, defaults.micro_live_allow_accumulation);
+    }
+
+    if (!db_get_setting(KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED, buffer, sizeof(buffer))) {
+        set_string_setting(KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED, defaults.micro_live_last_real_order_acknowledged);
     }
 
     if (!db_get_setting(KEY_RUNTIME_MODE, buffer, sizeof(buffer))) {
@@ -408,6 +429,13 @@ StrategySettings settings_load(void) {
 
     settings.micro_live_allow_accumulation =
         get_int_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, defaults.micro_live_allow_accumulation) ? 1 : 0;
+
+    get_string_setting(
+        KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED,
+        settings.micro_live_last_real_order_acknowledged,
+        sizeof(settings.micro_live_last_real_order_acknowledged),
+        defaults.micro_live_last_real_order_acknowledged
+    );
 
     if (settings.micro_live_max_order_eur <= 0.0 || settings.micro_live_max_order_eur > 50.0) {
         settings.micro_live_max_order_eur = defaults.micro_live_max_order_eur;

@@ -70,6 +70,11 @@ int order_journal_get_prelive_report(PreliveReport *report);
 
 int order_journal_real_sent_last_24h(void);
 
+int order_journal_get_latest_real_sent_order_id(
+    char *buffer,
+    int buffer_size
+);
+
 int order_journal_get_latest_unreconciled_real_order(
     RealOrderJournalRecord *record
 );

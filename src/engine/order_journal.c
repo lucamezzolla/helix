@@ -1,4 +1,5 @@
 #include "order_journal.h"
+#include "../db/database.h"
 
 #include <sqlite3.h>
 #include <stdio.h>
@@ -64,6 +65,26 @@ int order_journal_init(void) {
     sqlite3_exec(db, "ALTER TABLE order_journal ADD COLUMN execution_decision TEXT DEFAULT '';", NULL, NULL, NULL);
     sqlite3_exec(db, "ALTER TABLE order_journal ADD COLUMN execution_reason TEXT DEFAULT '';", NULL, NULL, NULL);
     sqlite3_exec(db, "ALTER TABLE order_journal ADD COLUMN executed_at TEXT DEFAULT '';", NULL, NULL, NULL);
+
+    const char *position_slots_sql =
+        "CREATE TABLE IF NOT EXISTS position_slots ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "buy_order_id TEXT NOT NULL UNIQUE,"
+        "buy_client_order_id TEXT NOT NULL,"
+        "base_size_btc REAL NOT NULL,"
+        "cost_eur REAL NOT NULL,"
+        "buy_fee_eur REAL DEFAULT 0,"
+        "avg_buy_price REAL DEFAULT 0,"
+        "status TEXT NOT NULL DEFAULT 'OPEN',"
+        "opened_at TEXT DEFAULT CURRENT_TIMESTAMP,"
+        "closed_at TEXT DEFAULT '',"
+        "sell_order_id TEXT DEFAULT '',"
+        "sell_net_eur REAL DEFAULT 0,"
+        "realized_profit_eur REAL DEFAULT 0"
+        ");";
+
+    sqlite3_exec(db, position_slots_sql, NULL, NULL, NULL);
+    sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_position_slots_status ON position_slots(status);", NULL, NULL, NULL);
 
     sqlite3_close(db);
     return ok;
@@ -205,6 +226,28 @@ int order_journal_record_execution_result(
     sqlite3_bind_text(stmt, 18, result->reason, -1, SQLITE_TRANSIENT);
 
     int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    if (
+        ok &&
+        result->sent_to_coinbase &&
+        result->allowed &&
+        plan->side == ORDER_EXECUTOR_SIDE_BUY &&
+        result->coinbase_order_id[0] != '\0' &&
+        plan->preview_base_size > 0.0
+    ) {
+        double slot_cost_eur = plan->requested_quote_size > 0.0 ?
+            plan->requested_quote_size :
+            plan->preview_total_eur;
+
+        db_create_position_slot_from_buy(
+            result->coinbase_order_id,
+            plan->client_order_id,
+            plan->preview_base_size,
+            slot_cost_eur,
+            plan->preview_fee_eur,
+            plan->preview_avg_price
+        );
+    }
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
@@ -375,6 +418,51 @@ int order_journal_real_sent_last_24h(void) {
     sqlite3_close(db);
 
     return count;
+}
+
+
+int order_journal_get_latest_real_sent_order_id(
+    char *buffer,
+    int buffer_size
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int found = 0;
+
+    if (buffer == NULL || buffer_size <= 0) {
+        return 0;
+    }
+
+    buffer[0] = '\0';
+
+    if (!order_journal_init()) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT COALESCE(NULLIF(coinbase_order_id, ''), client_order_id) "
+        "FROM order_journal "
+        "WHERE status = 'REAL_SENT' "
+        "ORDER BY id DESC LIMIT 1;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *value = sqlite3_column_text(stmt, 0);
+            if (value && value[0] != '\0') {
+                snprintf(buffer, (size_t)buffer_size, "%s", (const char *)value);
+                found = 1;
+            }
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return found;
 }
 
 

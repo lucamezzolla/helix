@@ -126,6 +126,32 @@ int db_init(void) {
         return 0;
     }
 
+
+    const char *position_slots_sql =
+        "CREATE TABLE IF NOT EXISTS position_slots ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "buy_order_id TEXT NOT NULL UNIQUE,"
+        "buy_client_order_id TEXT NOT NULL,"
+        "base_size_btc REAL NOT NULL,"
+        "cost_eur REAL NOT NULL,"
+        "buy_fee_eur REAL DEFAULT 0,"
+        "avg_buy_price REAL DEFAULT 0,"
+        "status TEXT NOT NULL DEFAULT 'OPEN',"
+        "opened_at TEXT DEFAULT CURRENT_TIMESTAMP,"
+        "closed_at TEXT DEFAULT '',"
+        "sell_order_id TEXT DEFAULT '',"
+        "sell_net_eur REAL DEFAULT 0,"
+        "realized_profit_eur REAL DEFAULT 0"
+        ");";
+
+    if (sqlite3_exec(db, position_slots_sql, NULL, NULL, &err) != SQLITE_OK) {
+        fprintf(stderr, "Errore SQL position_slots: %s\n", err);
+        sqlite3_free(err);
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_position_slots_status ON position_slots(status);", NULL, NULL, NULL);
     sqlite3_close(db);
 
     return 1;
@@ -834,6 +860,219 @@ int db_mark_dry_run_orders_recovered(void) {
         sqlite3_free(err);
     }
 
+    sqlite3_close(db);
+
+    return ok;
+}
+
+
+int db_create_position_slot_from_buy(
+    const char *buy_order_id,
+    const char *buy_client_order_id,
+    double base_size_btc,
+    double cost_eur,
+    double buy_fee_eur,
+    double avg_buy_price
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (buy_order_id == NULL || buy_order_id[0] == '\0') {
+        return 0;
+    }
+
+    if (buy_client_order_id == NULL || buy_client_order_id[0] == '\0') {
+        return 0;
+    }
+
+    if (base_size_btc <= 0.0 || cost_eur <= 0.0) {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "INSERT OR IGNORE INTO position_slots "
+        "(buy_order_id, buy_client_order_id, base_size_btc, cost_eur, buy_fee_eur, avg_buy_price, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'OPEN');";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, buy_order_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, buy_client_order_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(stmt, 3, base_size_btc);
+    sqlite3_bind_double(stmt, 4, cost_eur);
+    sqlite3_bind_double(stmt, 5, buy_fee_eur);
+    sqlite3_bind_double(stmt, 6, avg_buy_price);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return ok;
+}
+
+int db_rebuild_position_slots_from_real_buys(void) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int created = 0;
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "INSERT OR IGNORE INTO position_slots "
+        "(buy_order_id, buy_client_order_id, base_size_btc, cost_eur, "
+        " buy_fee_eur, avg_buy_price, status, opened_at) "
+        "SELECT "
+        "  coinbase_order_id, "
+        "  client_order_id, "
+        "  preview_base_size, "
+        "  CASE WHEN requested_quote_size > 0 THEN requested_quote_size ELSE preview_total_eur END, "
+        "  preview_fee_eur, "
+        "  preview_avg_price, "
+        "  'OPEN', "
+        "  created_at "
+        "FROM order_journal "
+        "WHERE side = 'BUY' "
+        "  AND dry_run = 0 "
+        "  AND status = 'REAL_SENT' "
+        "  AND phase = 'REAL_EXECUTION' "
+        "  AND decision = 'SENT' "
+        "  AND coinbase_order_id IS NOT NULL "
+        "  AND coinbase_order_id <> '' "
+        "  AND preview_base_size > 0 "
+        "  AND (CASE WHEN requested_quote_size > 0 THEN requested_quote_size ELSE preview_total_eur END) > 0;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    if (sqlite3_step(stmt) == SQLITE_DONE) {
+        created = sqlite3_changes(db);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return created;
+}
+
+int db_get_open_position_slots(
+    PositionSlotRecord *records,
+    int max_records
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int count = 0;
+
+    if (records == NULL || max_records <= 0) {
+        return 0;
+    }
+
+    memset(records, 0, sizeof(PositionSlotRecord) * (size_t)max_records);
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "SELECT id, buy_order_id, buy_client_order_id, base_size_btc, cost_eur, "
+        "       buy_fee_eur, avg_buy_price, status, opened_at, closed_at, "
+        "       sell_order_id, sell_net_eur, realized_profit_eur "
+        "FROM position_slots "
+        "WHERE status = 'OPEN' "
+        "ORDER BY opened_at ASC, id ASC "
+        "LIMIT ?;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_int(stmt, 1, max_records);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max_records) {
+        PositionSlotRecord *record = &records[count];
+        const unsigned char *text;
+
+        record->id = sqlite3_column_int(stmt, 0);
+
+        text = sqlite3_column_text(stmt, 1);
+        snprintf(record->buy_order_id, sizeof(record->buy_order_id), "%s", text ? (const char *)text : "");
+        text = sqlite3_column_text(stmt, 2);
+        snprintf(record->buy_client_order_id, sizeof(record->buy_client_order_id), "%s", text ? (const char *)text : "");
+
+        record->base_size_btc = sqlite3_column_double(stmt, 3);
+        record->cost_eur = sqlite3_column_double(stmt, 4);
+        record->buy_fee_eur = sqlite3_column_double(stmt, 5);
+        record->avg_buy_price = sqlite3_column_double(stmt, 6);
+
+        text = sqlite3_column_text(stmt, 7);
+        snprintf(record->status, sizeof(record->status), "%s", text ? (const char *)text : "");
+        text = sqlite3_column_text(stmt, 8);
+        snprintf(record->opened_at, sizeof(record->opened_at), "%s", text ? (const char *)text : "");
+        text = sqlite3_column_text(stmt, 9);
+        snprintf(record->closed_at, sizeof(record->closed_at), "%s", text ? (const char *)text : "");
+        text = sqlite3_column_text(stmt, 10);
+        snprintf(record->sell_order_id, sizeof(record->sell_order_id), "%s", text ? (const char *)text : "");
+
+        record->sell_net_eur = sqlite3_column_double(stmt, 11);
+        record->realized_profit_eur = sqlite3_column_double(stmt, 12);
+
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return count;
+}
+
+int db_close_position_slot(
+    int slot_id,
+    const char *sell_order_id,
+    double sell_net_eur,
+    double realized_profit_eur
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    if (slot_id <= 0 || sell_order_id == NULL || sell_order_id[0] == '\0') {
+        return 0;
+    }
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    const char *sql =
+        "UPDATE position_slots "
+        "SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, "
+        "    sell_order_id = ?, sell_net_eur = ?, realized_profit_eur = ? "
+        "WHERE id = ? AND status = 'OPEN';";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, sell_order_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(stmt, 2, sell_net_eur);
+    sqlite3_bind_double(stmt, 3, realized_profit_eur);
+    sqlite3_bind_int(stmt, 4, slot_id);
+
+    int ok = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) == 1;
+
+    sqlite3_finalize(stmt);
     sqlite3_close(db);
 
     return ok;
