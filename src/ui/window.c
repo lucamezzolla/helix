@@ -95,6 +95,8 @@ typedef struct {
     GtkWidget *arm_live_trading_button;
     GtkWidget *disarm_live_trading_button;
     GtkWidget *acknowledge_real_order_button;
+    GtkWidget *seed_paper_slots_button;
+    GtkWidget *clear_paper_slots_button;
     GtkWidget *runtime_mode_dropdown;
 
     GtkWidget *coinbase_api_key_entry;
@@ -1085,6 +1087,74 @@ static void on_acknowledge_real_order_clicked(GtkButton *button, gpointer user_d
     );
 
     fill_settings_entries(widgets);
+    refresh_dashboard(widgets);
+}
+
+
+static void on_seed_paper_slots_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->state == NULL) {
+        return;
+    }
+
+    db_clear_paper_position_slots();
+    int created = db_seed_demo_paper_position_slots();
+
+    char message[256];
+    snprintf(
+        message,
+        sizeof(message),
+        "Paper/SIM: seed demo ricreato, slot OPEN: %d",
+        created
+    );
+
+    db_log_engine_audit(
+        "PAPER_SIM",
+        "SEED_DEMO_SLOTS",
+        message,
+        widgets->state->current_price,
+        widgets->state->btc_balance,
+        widgets->state->eur_balance,
+        0.0,
+        0.0
+    );
+
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+
+    refresh_dashboard(widgets);
+}
+
+static void on_clear_paper_slots_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->state == NULL) {
+        return;
+    }
+
+    int ok = db_clear_paper_position_slots();
+
+    const char *message = ok ?
+        "Paper/SIM: slot paper eliminati" :
+        "Paper/SIM: errore eliminazione slot paper";
+
+    db_log_engine_audit(
+        "PAPER_SIM",
+        ok ? "CLEAR_SLOTS" : "CLEAR_SLOTS_FAILED",
+        message,
+        widgets->state->current_price,
+        widgets->state->btc_balance,
+        widgets->state->eur_balance,
+        0.0,
+        0.0
+    );
+
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+
     refresh_dashboard(widgets);
 }
 
@@ -2252,6 +2322,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *arm_live_trading_button;
     GtkWidget *disarm_live_trading_button;
     GtkWidget *acknowledge_real_order_button;
+    GtkWidget *paper_slots_buttons_box;
+    GtkWidget *seed_paper_slots_button;
+    GtkWidget *clear_paper_slots_button;
     GtkWidget *runtime_mode_dropdown;
     GtkWidget *save_settings_button;
     GtkWidget *emergency_buttons_box;
@@ -2426,6 +2499,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), disarm_live_trading_button);
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), acknowledge_real_order_button);
 
+    paper_slots_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    seed_paper_slots_button = gtk_button_new_with_label("Seed paper slots demo");
+    clear_paper_slots_button = gtk_button_new_with_label("Clear paper slots");
+    gtk_box_append(GTK_BOX(paper_slots_buttons_box), seed_paper_slots_button);
+    gtk_box_append(GTK_BOX(paper_slots_buttons_box), clear_paper_slots_button);
+
     reserve_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     release_reserve_slot_button = gtk_button_new_with_label("Sblocca 1 slot riserva");
     lock_reserve_slot_button = gtk_button_new_with_label("Riblocca 1 slot riserva");
@@ -2458,6 +2537,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(settings_box), emergency_buttons_box);
     gtk_box_append(GTK_BOX(settings_box), live_trading_arm_label);
     gtk_box_append(GTK_BOX(settings_box), live_trading_arm_buttons_box);
+    gtk_box_append(GTK_BOX(settings_box), paper_slots_buttons_box);
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Modalità operativa", runtime_mode_dropdown));
     gtk_box_append(GTK_BOX(settings_box), save_settings_button);
 
@@ -2618,6 +2698,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->arm_live_trading_button = arm_live_trading_button;
     widgets->disarm_live_trading_button = disarm_live_trading_button;
     widgets->acknowledge_real_order_button = acknowledge_real_order_button;
+    widgets->seed_paper_slots_button = seed_paper_slots_button;
+    widgets->clear_paper_slots_button = clear_paper_slots_button;
     widgets->runtime_mode_dropdown = runtime_mode_dropdown;
     widgets->coinbase_api_key_entry = coinbase_api_key_entry;
     widgets->coinbase_api_secret_entry = coinbase_api_secret_entry;
@@ -2698,6 +2780,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     g_signal_connect(arm_live_trading_button, "clicked", G_CALLBACK(on_arm_live_trading_clicked), widgets);
     g_signal_connect(disarm_live_trading_button, "clicked", G_CALLBACK(on_disarm_live_trading_clicked), widgets);
     g_signal_connect(acknowledge_real_order_button, "clicked", G_CALLBACK(on_acknowledge_real_order_clicked), widgets);
+    g_signal_connect(seed_paper_slots_button, "clicked", G_CALLBACK(on_seed_paper_slots_clicked), widgets);
+    g_signal_connect(clear_paper_slots_button, "clicked", G_CALLBACK(on_clear_paper_slots_clicked), widgets);
     g_signal_connect(release_reserve_slot_button, "clicked", G_CALLBACK(on_release_reserve_slot_clicked), widgets);
     g_signal_connect(lock_reserve_slot_button, "clicked", G_CALLBACK(on_lock_reserve_slot_clicked), widgets);
     g_signal_connect(save_coinbase_button, "clicked", G_CALLBACK(on_save_coinbase_clicked), widgets);
