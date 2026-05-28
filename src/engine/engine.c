@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <stdlib.h>
 
 #define AUDIT_COOLDOWN_SECONDS 300
 #define AUDIT_LOW_PRIORITY_COOLDOWN_SECONDS 900

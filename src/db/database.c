@@ -1062,6 +1062,86 @@ int db_get_open_position_slots(
     return count;
 }
 
+
+int db_find_open_position_slot_by_base_size(
+    double base_size_btc,
+    PositionSlotRecord *record
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int found = 0;
+
+    if (record == NULL || base_size_btc <= 0.0) {
+        return 0;
+    }
+
+    memset(record, 0, sizeof(*record));
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return 0;
+    }
+
+    /*
+     * We use a small tolerance because Coinbase preview/execution quantities
+     * may be rounded at 8 decimal places.
+     */
+    const char *sql =
+        "SELECT id, buy_order_id, buy_client_order_id, base_size_btc, cost_eur, "
+        "       buy_fee_eur, avg_buy_price, status, opened_at, closed_at, "
+        "       sell_order_id, sell_net_eur, realized_profit_eur "
+        "FROM position_slots "
+        "WHERE status = 'OPEN' "
+        "  AND ABS(base_size_btc - ?) <= 0.00000001 "
+        "ORDER BY opened_at ASC, id ASC "
+        "LIMIT 1;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_double(stmt, 1, base_size_btc);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *text;
+
+        record->id = sqlite3_column_int(stmt, 0);
+
+        text = sqlite3_column_text(stmt, 1);
+        snprintf(record->buy_order_id, sizeof(record->buy_order_id), "%s", text ? (const char *)text : "");
+
+        text = sqlite3_column_text(stmt, 2);
+        snprintf(record->buy_client_order_id, sizeof(record->buy_client_order_id), "%s", text ? (const char *)text : "");
+
+        record->base_size_btc = sqlite3_column_double(stmt, 3);
+        record->cost_eur = sqlite3_column_double(stmt, 4);
+        record->buy_fee_eur = sqlite3_column_double(stmt, 5);
+        record->avg_buy_price = sqlite3_column_double(stmt, 6);
+
+        text = sqlite3_column_text(stmt, 7);
+        snprintf(record->status, sizeof(record->status), "%s", text ? (const char *)text : "");
+
+        text = sqlite3_column_text(stmt, 8);
+        snprintf(record->opened_at, sizeof(record->opened_at), "%s", text ? (const char *)text : "");
+
+        text = sqlite3_column_text(stmt, 9);
+        snprintf(record->closed_at, sizeof(record->closed_at), "%s", text ? (const char *)text : "");
+
+        text = sqlite3_column_text(stmt, 10);
+        snprintf(record->sell_order_id, sizeof(record->sell_order_id), "%s", text ? (const char *)text : "");
+
+        record->sell_net_eur = sqlite3_column_double(stmt, 11);
+        record->realized_profit_eur = sqlite3_column_double(stmt, 12);
+
+        found = 1;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    return found;
+}
+
 int db_close_position_slot(
     int slot_id,
     const char *sell_order_id,

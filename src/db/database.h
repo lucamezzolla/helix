@@ -102,6 +102,11 @@ int db_close_position_slot(
     double realized_profit_eur
 );
 
+int db_find_open_position_slot_by_base_size(
+    double base_size_btc,
+    PositionSlotRecord *record
+);
+
 
 int db_create_paper_position_slot(
     const char *label,
