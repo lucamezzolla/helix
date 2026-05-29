@@ -280,6 +280,66 @@ static gboolean clear_temporary_status_message(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
+static void show_action_dialog(AppWidgets *widgets, const char *message) {
+    GtkWidget *dialog;
+    GtkWidget *box;
+    GtkWidget *title;
+    GtkWidget *label;
+    GtkWidget *button;
+    GtkWindow *parent = NULL;
+
+    if (widgets == NULL || message == NULL || message[0] == '\0') {
+        return;
+    }
+
+    if (widgets->window != NULL) {
+        parent = GTK_WINDOW(widgets->window);
+    }
+
+    dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Helix");
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 360, 145);
+    gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
+
+    if (parent != NULL) {
+        gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
+    }
+
+    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+    gtk_widget_add_css_class(box, "helix-action-dialog");
+    gtk_widget_set_margin_top(box, 16);
+    gtk_widget_set_margin_bottom(box, 16);
+    gtk_widget_set_margin_start(box, 18);
+    gtk_widget_set_margin_end(box, 18);
+
+    title = gtk_label_new("Helix");
+    gtk_widget_add_css_class(title, "helix-action-dialog-title");
+    gtk_label_set_xalign(GTK_LABEL(title), 0.5f);
+    gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
+
+    label = gtk_label_new(message);
+    gtk_widget_add_css_class(label, "helix-action-dialog-message");
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.5f);
+    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+    gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
+
+    button = gtk_button_new_with_label("OK");
+    gtk_widget_add_css_class(button, "dialog-action-button");
+    gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
+
+    g_signal_connect_swapped(button, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
+
+    gtk_box_append(GTK_BOX(box), title);
+    gtk_box_append(GTK_BOX(box), label);
+    gtk_box_append(GTK_BOX(box), button);
+
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
 static void set_temporary_status_message(AppWidgets *widgets, const char *message) {
     if (widgets == NULL || widgets->status_label == NULL || message == NULL) {
         return;
@@ -287,7 +347,10 @@ static void set_temporary_status_message(AppWidgets *widgets, const char *messag
 
     gtk_widget_remove_css_class(widgets->status_label, "status-running");
     gtk_widget_remove_css_class(widgets->status_label, "status-stopped");
+    gtk_widget_remove_css_class(widgets->status_label, "status-error");
+
     gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+
 
     widgets->has_temporary_status_message = TRUE;
 
@@ -598,6 +661,7 @@ static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
     gtk_widget_set_size_request(label, 180, -1);
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_max_width_chars(GTK_LABEL(label), 28);
     gtk_widget_set_hexpand(entry, TRUE);
@@ -623,16 +687,17 @@ static void configure_action_button(GtkWidget *button) {
         return;
     }
 
-    gtk_widget_add_css_class(button, "form-action-button");
+    gtk_widget_add_css_class(button, "dialog-action-button");
     gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
 }
 
 static GtkWidget *create_section_title(const char *title) {
     GtkWidget *label = gtk_label_new(title);
 
-    gtk_widget_add_css_class(label, "title-4");
+    gtk_widget_add_css_class(label, "section-title");
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
 
     return label;
 }
@@ -651,6 +716,7 @@ static void configure_dashboard_label(GtkWidget *label) {
 
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
     gtk_label_set_yalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
     gtk_label_set_max_width_chars(GTK_LABEL(label), 110);
@@ -931,25 +997,19 @@ static void on_save_coinbase_clicked(GtkButton *button, gpointer user_data) {
         strlen(api_key) == 0 ||
         strlen(api_secret) == 0
     ) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Errore: API Key e API Secret sono obbligatorie"
-        );
+        set_temporary_status_message(widgets, "Errore: API Key e API Secret sono obbligatorie");
+    show_action_dialog(widgets, "Errore: API Key e API Secret sono obbligatorie");
         return;
     }
 
     if (!env_save_coinbase_credentials(api_key, api_secret)) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Errore: impossibile salvare .env"
-        );
+        set_temporary_status_message(widgets, "Errore: impossibile salvare .env");
+    show_action_dialog(widgets, "Errore: impossibile salvare .env");
         return;
     }
 
-    gtk_label_set_text(
-        GTK_LABEL(widgets->status_label),
-        "Credenziali Coinbase salvate in .env"
-    );
+    set_temporary_status_message(widgets, "Credenziali Coinbase salvate in .env");
+    show_action_dialog(widgets, "Credenziali Coinbase salvate in .env");
 
     refresh_dashboard(widgets);
 }
@@ -966,10 +1026,8 @@ static void on_release_reserve_slot_clicked(GtkButton *button, gpointer user_dat
     }
 
     if (settings.reserve_released_slots >= settings.max_slots) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Riserva: tutti gli slot risultano già sbloccati"
-        );
+        set_temporary_status_message(widgets, "Riserva: tutti gli slot risultano già sbloccati");
+    show_action_dialog(widgets, "Riserva: tutti gli slot risultano già sbloccati");
         return;
     }
 
@@ -995,7 +1053,8 @@ static void on_release_reserve_slot_clicked(GtkButton *button, gpointer user_dat
         0.0
     );
 
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), reason);
+    set_temporary_status_message(widgets, reason);
+    show_action_dialog(widgets, reason);
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
 }
@@ -1012,10 +1071,8 @@ static void on_lock_reserve_slot_clicked(GtkButton *button, gpointer user_data) 
     }
 
     if (settings.reserve_released_slots <= 0) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Riserva: nessuno slot riserva da ribloccare"
-        );
+        set_temporary_status_message(widgets, "Riserva: nessuno slot riserva da ribloccare");
+    show_action_dialog(widgets, "Riserva: nessuno slot riserva da ribloccare");
         return;
     }
 
@@ -1041,7 +1098,8 @@ static void on_lock_reserve_slot_clicked(GtkButton *button, gpointer user_data) 
         0.0
     );
 
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), reason);
+    set_temporary_status_message(widgets, reason);
+    show_action_dialog(widgets, reason);
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
 }
@@ -1076,10 +1134,8 @@ static void on_activate_emergency_stop_clicked(GtkButton *button, gpointer user_
         0.0
     );
 
-    gtk_label_set_text(
-        GTK_LABEL(widgets->status_label),
-        "Emergency stop attivato: bot fermo e operazioni bloccate"
-    );
+    set_temporary_status_message(widgets, "Emergency stop attivato: bot fermo e operazioni bloccate");
+    show_action_dialog(widgets, "Emergency stop attivato: bot fermo e operazioni bloccate");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1107,10 +1163,8 @@ static void on_reset_emergency_stop_clicked(GtkButton *button, gpointer user_dat
         0.0
     );
 
-    gtk_label_set_text(
-        GTK_LABEL(widgets->status_label),
-        "Emergency stop resettato: il bot resta fermo finché non premi Start"
-    );
+    set_temporary_status_message(widgets, "Emergency stop resettato: il bot resta fermo finché non premi Start");
+    show_action_dialog(widgets, "Emergency stop resettato: il bot resta fermo finché non premi Start");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1128,10 +1182,8 @@ static void on_arm_live_trading_clicked(GtkButton *button, gpointer user_data) {
     StrategySettings settings = settings_load();
 
     if (settings.emergency_stop_enabled) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "LIVE_TRADING arm bloccato: kill-switch attivo"
-        );
+        set_temporary_status_message(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
+    show_action_dialog(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
         return;
     }
 
@@ -1149,10 +1201,8 @@ static void on_arm_live_trading_clicked(GtkButton *button, gpointer user_data) {
         0.0
     );
 
-    gtk_label_set_text(
-        GTK_LABEL(widgets->status_label),
-        "LIVE_TRADING armato: invio ordini reali ancora bloccato dal codice"
-    );
+    set_temporary_status_message(widgets, "LIVE_TRADING armato: invio ordini reali ancora bloccato dal codice");
+    show_action_dialog(widgets, "LIVE_TRADING armato: invio ordini reali ancora bloccato dal codice");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1182,10 +1232,8 @@ static void on_disarm_live_trading_clicked(GtkButton *button, gpointer user_data
         0.0
     );
 
-    gtk_label_set_text(
-        GTK_LABEL(widgets->status_label),
-        "LIVE_TRADING disarmato"
-    );
+    set_temporary_status_message(widgets, "LIVE_TRADING disarmato");
+    show_action_dialog(widgets, "LIVE_TRADING disarmato");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1205,10 +1253,8 @@ static void on_acknowledge_real_order_clicked(GtkButton *button, gpointer user_d
     latest_order_id[0] = '\0';
 
     if (!order_journal_get_latest_real_sent_order_id(latest_order_id, sizeof(latest_order_id))) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Nessun ordine reale REAL_SENT da riconoscere"
-        );
+        set_temporary_status_message(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
+    show_action_dialog(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
         return;
     }
 
@@ -1242,10 +1288,8 @@ static void on_acknowledge_real_order_clicked(GtkButton *button, gpointer user_d
         0.0
     );
 
-    gtk_label_set_text(
-        GTK_LABEL(widgets->status_label),
-        "Ultimo ordine reale riconosciuto: Helix può essere riarmato dopo revisione"
-    );
+    set_temporary_status_message(widgets, "Ultimo ordine reale riconosciuto: Helix può essere riarmato dopo revisione");
+    show_action_dialog(widgets, "Ultimo ordine reale riconosciuto: Helix può essere riarmato dopo revisione");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1283,7 +1327,8 @@ static void on_seed_paper_slots_clicked(GtkButton *button, gpointer user_data) {
         0.0
     );
 
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+    set_temporary_status_message(widgets, message);
+    show_action_dialog(widgets, message);
 
     refresh_dashboard(widgets);
 }
@@ -1314,7 +1359,8 @@ static void on_clear_paper_slots_clicked(GtkButton *button, gpointer user_data) 
         0.0
     );
 
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+    set_temporary_status_message(widgets, message);
+    show_action_dialog(widgets, message);
 
     refresh_dashboard(widgets);
 }
@@ -1332,10 +1378,8 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
     StrategySettings settings = settings_load();
 
     if (widgets->state->current_price <= 0.0) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido"
-        );
+        set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
+    show_action_dialog(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
 
         db_log_engine_audit(
             "PAPER_SIM",
@@ -1360,10 +1404,8 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
     );
 
     if (slot_count <= 0) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN"
-        );
+        set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
+    show_action_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
 
         db_log_engine_audit(
             "PAPER_SIM",
@@ -1436,10 +1478,8 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
     }
 
     if (best_index < 0) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Paper/SIM BEST_PROFIT: nessuno slot selezionabile"
-        );
+        set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
+    show_action_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
         return;
     }
 
@@ -1508,7 +1548,8 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
         );
     }
 
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+    set_temporary_status_message(widgets, message);
+    show_action_dialog(widgets, message);
 
     refresh_dashboard(widgets);
 }
@@ -1586,12 +1627,14 @@ static void on_save_email_clicked(GtkButton *button, gpointer user_data) {
     read_email_settings_from_entries(widgets, &settings);
 
     if (!email_settings_are_valid(&settings, message, sizeof(message))) {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+        set_temporary_status_message(widgets, message);
+    show_action_dialog(widgets, message);
         return;
     }
 
     settings_save(&settings);
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze email salvate");
+    set_temporary_status_message(widgets, "Preferenze email salvate");
+    show_action_dialog(widgets, "Preferenze email salvate");
 }
 
 static void on_test_email_clicked(GtkButton *button, gpointer user_data) {
@@ -1608,9 +1651,11 @@ static void on_test_email_clicked(GtkButton *button, gpointer user_data) {
     settings_save(&settings);
 
     if (email_delivery_send_test(&settings, message, sizeof(message))) {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+        set_temporary_status_message(widgets, message);
+    show_action_dialog(widgets, message);
     } else {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+        set_temporary_status_message(widgets, message);
+    show_action_dialog(widgets, message);
     }
 }
 
@@ -1735,10 +1780,8 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
         settings.micro_live_max_order_eur <= 0.0 ||
         settings.micro_live_max_order_eur > 50.0
     ) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Errore: impostazioni non valide"
-        );
+        set_temporary_status_message(widgets, "Errore: impostazioni non valide");
+    show_action_dialog(widgets, "Errore: impostazioni non valide");
         return;
     }
 
@@ -1748,15 +1791,11 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
     db_save_state(widgets->state);
 
     if (settings.runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "LIVE_TRADING salvato ma bloccato dai safety checks"
-        );
+        set_temporary_status_message(widgets, "LIVE_TRADING salvato ma bloccato dai safety checks");
+    show_action_dialog(widgets, "LIVE_TRADING salvato ma bloccato dai safety checks");
     } else {
-        gtk_label_set_text(
-            GTK_LABEL(widgets->status_label),
-            "Impostazioni salvate"
-        );
+        set_temporary_status_message(widgets, "Impostazioni salvate");
+    show_action_dialog(widgets, "Impostazioni salvate");
     }
 
     refresh_dashboard(widgets);
@@ -2131,7 +2170,9 @@ static void show_dryrun_scenario_dialog(AppWidgets *widgets) {
 static GtkWidget *create_table_cell_label(const char *text, gboolean header) {
     GtkWidget *label = gtk_label_new(text ? text : "");
 
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.5f);
+    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+    gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
     gtk_label_set_yalign(GTK_LABEL(label), 0.0f);
     gtk_label_set_selectable(GTK_LABEL(label), TRUE);
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
@@ -2309,7 +2350,7 @@ static void on_menu_show_strategy_settings_action(GSimpleAction *action, GVarian
 
     fill_settings_entries(widgets);
     present_utility_window(widgets->settings_expander);
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze: impostazioni strategia aperte");
+    set_temporary_status_message(widgets, "Preferenze: impostazioni strategia aperte");
 }
 
 static void on_menu_show_email_report_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -2324,7 +2365,7 @@ static void on_menu_show_email_report_action(GSimpleAction *action, GVariant *pa
 
     fill_settings_entries(widgets);
     present_utility_window(widgets->email_expander);
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze: email report aperte");
+    set_temporary_status_message(widgets, "Preferenze: email report aperte");
 }
 
 static void on_menu_show_coinbase_api_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -2339,7 +2380,7 @@ static void on_menu_show_coinbase_api_action(GSimpleAction *action, GVariant *pa
 
     fill_coinbase_entries(widgets);
     present_utility_window(widgets->coinbase_expander);
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze: Coinbase API aperte");
+    set_temporary_status_message(widgets, "Preferenze: Coinbase API aperte");
 }
 
 static void on_menu_show_trade_history_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -2354,7 +2395,7 @@ static void on_menu_show_trade_history_action(GSimpleAction *action, GVariant *p
 
     refresh_trade_history(widgets);
     present_utility_window(widgets->history_scrolled_window);
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: storico operazioni aperto");
+    set_temporary_status_message(widgets, "Visualizza: storico operazioni aperto");
 }
 
 static void on_menu_show_engine_audit_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -2369,7 +2410,7 @@ static void on_menu_show_engine_audit_action(GSimpleAction *action, GVariant *pa
 
     refresh_engine_audit(widgets);
     present_utility_window(widgets->audit_scrolled_window);
-    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: audit decisioni aperto");
+    set_temporary_status_message(widgets, "Visualizza: audit decisioni aperto");
 }
 
 
@@ -2393,7 +2434,7 @@ static void on_menu_show_position_slots_table_action(GSimpleAction *action, GVar
     );
 
     if (widgets != NULL && widgets->status_label != NULL) {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella slot reali aperta");
+        set_temporary_status_message(widgets, "Visualizza: tabella slot reali aperta");
     }
 }
 
@@ -2416,7 +2457,7 @@ static void on_menu_show_trades_table_action(GSimpleAction *action, GVariant *pa
     );
 
     if (widgets != NULL && widgets->status_label != NULL) {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella trades aperta");
+        set_temporary_status_message(widgets, "Visualizza: tabella trades aperta");
     }
 }
 
@@ -2441,7 +2482,7 @@ static void on_menu_show_order_journal_table_action(GSimpleAction *action, GVari
     );
 
     if (widgets != NULL && widgets->status_label != NULL) {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella order journal aperta");
+        set_temporary_status_message(widgets, "Visualizza: tabella order journal aperta");
     }
 }
 
@@ -2464,7 +2505,7 @@ static void on_menu_show_engine_audit_table_action(GSimpleAction *action, GVaria
     );
 
     if (widgets != NULL && widgets->status_label != NULL) {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella engine audit aperta");
+        set_temporary_status_message(widgets, "Visualizza: tabella engine audit aperta");
     }
 }
 
@@ -2700,7 +2741,7 @@ static void on_menu_show_prelive_report_action(GSimpleAction *action, GVariant *
     );
 
     if (widgets != NULL && widgets->status_label != NULL) {
-        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: report pre-live aperto");
+        set_temporary_status_message(widgets, "Visualizza: report pre-live aperto");
     }
 }
 
@@ -2730,10 +2771,7 @@ static void on_menu_export_prelive_report_action(GSimpleAction *action, GVariant
 
     if (file == NULL) {
         if (widgets != NULL && widgets->status_label != NULL) {
-            gtk_label_set_text(
-                GTK_LABEL(widgets->status_label),
-                "Errore: impossibile esportare data/prelive_report.txt"
-            );
+            set_temporary_status_message(widgets, "Errore: impossibile esportare data/prelive_report.txt");
         }
         return;
     }
@@ -3242,6 +3280,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     };
 
     runtime_mode_dropdown = gtk_drop_down_new_from_strings(runtime_modes);
+    gtk_widget_add_css_class(runtime_mode_dropdown, "helix-dropdown");
 
     save_settings_button = gtk_button_new_with_label("Salva impostazioni");
     configure_action_button(save_settings_button);
