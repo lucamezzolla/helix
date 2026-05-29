@@ -356,6 +356,37 @@ static void show_action_error_dialog(AppWidgets *widgets, const char *message) {
     show_action_dialog_typed(widgets, "Errore", message, "helix-action-error");
 }
 
+static void show_action_auto_dialog(AppWidgets *widgets, const char *message) {
+    if (message == NULL) {
+        return;
+    }
+
+    if (
+        strstr(message, "errore") != NULL ||
+        strstr(message, "Errore") != NULL ||
+        strstr(message, "fallito") != NULL ||
+        strstr(message, "fallita") != NULL ||
+        strstr(message, "NON chiuso") != NULL ||
+        strstr(message, "impossibile") != NULL
+    ) {
+        show_action_error_dialog(widgets, message);
+        return;
+    }
+
+    if (
+        strstr(message, "bloccato") != NULL ||
+        strstr(message, "bloccata") != NULL ||
+        strstr(message, "nessuno") != NULL ||
+        strstr(message, "Nessun") != NULL ||
+        strstr(message, "non profittevole") != NULL
+    ) {
+        show_action_warning_dialog(widgets, message);
+        return;
+    }
+
+    show_action_info_dialog(widgets, message);
+}
+
 static void set_temporary_status_message(AppWidgets *widgets, const char *message) {
     if (widgets == NULL || widgets->status_label == NULL || message == NULL) {
         return;
@@ -1014,13 +1045,13 @@ static void on_save_coinbase_clicked(GtkButton *button, gpointer user_data) {
         strlen(api_secret) == 0
     ) {
         set_temporary_status_message(widgets, "Errore: API Key e API Secret sono obbligatorie");
-    show_action_error_dialog(widgets, "Errore: API Key e API Secret sono obbligatorie");
+        show_action_error_dialog(widgets, "Errore: API Key e API Secret sono obbligatorie");
         return;
     }
 
     if (!env_save_coinbase_credentials(api_key, api_secret)) {
         set_temporary_status_message(widgets, "Errore: impossibile salvare .env");
-    show_action_error_dialog(widgets, "Errore: impossibile salvare .env");
+        show_action_error_dialog(widgets, "Errore: impossibile salvare .env");
         return;
     }
 
@@ -1043,7 +1074,7 @@ static void on_release_reserve_slot_clicked(GtkButton *button, gpointer user_dat
 
     if (settings.reserve_released_slots >= settings.max_slots) {
         set_temporary_status_message(widgets, "Riserva: tutti gli slot risultano già sbloccati");
-    show_action_warning_dialog(widgets, "Riserva: tutti gli slot risultano già sbloccati");
+        show_action_warning_dialog(widgets, "Riserva: tutti gli slot risultano già sbloccati");
         return;
     }
 
@@ -1088,7 +1119,7 @@ static void on_lock_reserve_slot_clicked(GtkButton *button, gpointer user_data) 
 
     if (settings.reserve_released_slots <= 0) {
         set_temporary_status_message(widgets, "Riserva: nessuno slot riserva da ribloccare");
-    show_action_warning_dialog(widgets, "Riserva: nessuno slot riserva da ribloccare");
+        show_action_warning_dialog(widgets, "Riserva: nessuno slot riserva da ribloccare");
         return;
     }
 
@@ -1199,7 +1230,7 @@ static void on_arm_live_trading_clicked(GtkButton *button, gpointer user_data) {
 
     if (settings.emergency_stop_enabled) {
         set_temporary_status_message(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
-    show_action_warning_dialog(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
+        show_action_warning_dialog(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
         return;
     }
 
@@ -1270,7 +1301,7 @@ static void on_acknowledge_real_order_clicked(GtkButton *button, gpointer user_d
 
     if (!order_journal_get_latest_real_sent_order_id(latest_order_id, sizeof(latest_order_id))) {
         set_temporary_status_message(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
-    show_action_warning_dialog(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
+        show_action_warning_dialog(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
         return;
     }
 
@@ -1344,13 +1375,7 @@ static void on_seed_paper_slots_clicked(GtkButton *button, gpointer user_data) {
     );
 
     set_temporary_status_message(widgets, message);
-    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
-        show_action_error_dialog(widgets, message);
-    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
-        show_action_warning_dialog(widgets, message);
-    } else {
-        show_action_info_dialog(widgets, message);
-    }
+    show_action_auto_dialog(widgets, message);
 
     refresh_dashboard(widgets);
 }
@@ -1382,13 +1407,7 @@ static void on_clear_paper_slots_clicked(GtkButton *button, gpointer user_data) 
     );
 
     set_temporary_status_message(widgets, message);
-    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
-        show_action_error_dialog(widgets, message);
-    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
-        show_action_warning_dialog(widgets, message);
-    } else {
-        show_action_info_dialog(widgets, message);
-    }
+    show_action_auto_dialog(widgets, message);
 
     refresh_dashboard(widgets);
 }
@@ -1407,7 +1426,7 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
 
     if (widgets->state->current_price <= 0.0) {
         set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
-    show_action_error_dialog(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
+        show_action_error_dialog(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
 
         db_log_engine_audit(
             "PAPER_SIM",
@@ -1433,7 +1452,7 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
 
     if (slot_count <= 0) {
         set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
-    show_action_warning_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
+        show_action_warning_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
 
         db_log_engine_audit(
             "PAPER_SIM",
@@ -1507,7 +1526,7 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
 
     if (best_index < 0) {
         set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
-    show_action_warning_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
+        show_action_warning_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
         return;
     }
 
@@ -1577,13 +1596,7 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
     }
 
     set_temporary_status_message(widgets, message);
-    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
-        show_action_error_dialog(widgets, message);
-    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
-        show_action_warning_dialog(widgets, message);
-    } else {
-        show_action_info_dialog(widgets, message);
-    }
+    show_action_auto_dialog(widgets, message);
 
     refresh_dashboard(widgets);
 }
@@ -1662,13 +1675,7 @@ static void on_save_email_clicked(GtkButton *button, gpointer user_data) {
 
     if (!email_settings_are_valid(&settings, message, sizeof(message))) {
         set_temporary_status_message(widgets, message);
-    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
-        show_action_error_dialog(widgets, message);
-    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
-        show_action_warning_dialog(widgets, message);
-    } else {
-        show_action_info_dialog(widgets, message);
-    }
+        show_action_auto_dialog(widgets, message);
         return;
     }
 
@@ -1692,22 +1699,10 @@ static void on_test_email_clicked(GtkButton *button, gpointer user_data) {
 
     if (email_delivery_send_test(&settings, message, sizeof(message))) {
         set_temporary_status_message(widgets, message);
-    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
-        show_action_error_dialog(widgets, message);
-    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
-        show_action_warning_dialog(widgets, message);
-    } else {
-        show_action_info_dialog(widgets, message);
-    }
+        show_action_auto_dialog(widgets, message);
     } else {
         set_temporary_status_message(widgets, message);
-    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
-        show_action_error_dialog(widgets, message);
-    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
-        show_action_warning_dialog(widgets, message);
-    } else {
-        show_action_info_dialog(widgets, message);
-    }
+        show_action_auto_dialog(widgets, message);
     }
 }
 

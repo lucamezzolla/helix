@@ -115,26 +115,89 @@ CoinbaseCredentials env_load_coinbase_credentials(void) {
     return credentials;
 }
 
+static int env_value_is_single_line(const char *value) {
+    if (value == NULL || value[0] == '\0') {
+        return 0;
+    }
+
+    return strchr(value, '\n') == NULL && strchr(value, '\r') == NULL;
+}
+
 int env_save_coinbase_credentials(
     const char *api_key,
     const char *api_secret
 ) {
-    if (api_key == NULL || api_secret == NULL) {
+    FILE *input;
+    FILE *output;
+    char preserved[32768];
+    size_t preserved_len = 0;
+    char line[4096];
+
+    if (
+        !env_value_is_single_line(api_key) ||
+        !env_value_is_single_line(api_secret)
+    ) {
         return 0;
     }
 
-    FILE *file = fopen(ENV_PATH, "w");
+    preserved[0] = '\0';
 
-    if (!file) {
+    input = fopen(ENV_PATH, "r");
+    if (input != NULL) {
+        while (fgets(line, sizeof(line), input)) {
+            char line_copy[4096];
+            char *equals;
+            char *key;
+
+            snprintf(line_copy, sizeof(line_copy), "%s", line);
+            trim(line_copy);
+
+            equals = strchr(line_copy, '=');
+            if (equals != NULL) {
+                *equals = '\0';
+                key = line_copy;
+                trim(key);
+
+                if (
+                    strcmp(key, "COINBASE_API_KEY") == 0 ||
+                    strcmp(key, "COINBASE_API_SECRET") == 0
+                ) {
+                    continue;
+                }
+            }
+
+            size_t line_len = strlen(line);
+            if (line_len < sizeof(preserved) - preserved_len - 1) {
+                memcpy(preserved + preserved_len, line, line_len);
+                preserved_len += line_len;
+                preserved[preserved_len] = '\0';
+            }
+        }
+
+        fclose(input);
+    }
+
+    output = fopen(ENV_PATH, "w");
+    if (output == NULL) {
         return 0;
     }
 
-    fprintf(file, "# Helix Coinbase credentials\n");
-    fprintf(file, "# This file is local and must never be committed.\n");
-    fprintf(file, "COINBASE_API_KEY=%s\n", api_key);
-    fprintf(file, "COINBASE_API_SECRET=%s\n", api_secret);
+    if (preserved_len > 0) {
+        fputs(preserved, output);
+        if (preserved[preserved_len - 1] != '\n') {
+            fputc('\n', output);
+        }
+    } else {
+        fprintf(output, "# Helix local configuration\n");
+        fprintf(output, "# This file is local and must never be committed.\n");
+    }
 
-    fclose(file);
+    fprintf(output, "COINBASE_API_KEY=%s\n", api_key);
+    fprintf(output, "COINBASE_API_SECRET=%s\n", api_secret);
+
+    if (fclose(output) != 0) {
+        return 0;
+    }
 
     return 1;
 }

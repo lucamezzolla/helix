@@ -577,8 +577,8 @@ int db_get_recent_engine_audits(
 
 
 static int db_count_engine_audit_matches(const char *where_clause, int days) {
-    sqlite3 *db;
-    sqlite3_stmt *stmt;
+    sqlite3 *db = NULL;
+    sqlite3_stmt *stmt = NULL;
     char sql[512];
     int count = 0;
 
@@ -607,7 +607,9 @@ static int db_count_engine_audit_matches(const char *where_clause, int days) {
         }
     }
 
-    sqlite3_finalize(stmt);
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
     sqlite3_close(db);
 
     return count;

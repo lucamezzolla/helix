@@ -34,18 +34,31 @@ static void safe_copy(char *dst, size_t dst_size, const char *src) {
 }
 
 static void make_client_order_id(char *buffer, size_t buffer_size, const char *side) {
-    time_t now = time(NULL);
+    static unsigned long sequence = 0;
+    struct timespec ts;
+    unsigned long local_sequence;
 
     if (buffer == NULL || buffer_size == 0) {
         return;
     }
 
+    buffer[0] = '\0';
+
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+        ts.tv_sec = time(NULL);
+        ts.tv_nsec = 0;
+    }
+
+    local_sequence = ++sequence;
+
     snprintf(
         buffer,
         buffer_size,
-        "helix-dryrun-%s-%ld",
+        "helix-dryrun-%s-%ld-%09ld-%lu",
         side ? side : "unknown",
-        (long) now
+        (long)ts.tv_sec,
+        (long)ts.tv_nsec,
+        local_sequence
     );
 }
 
