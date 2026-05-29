@@ -3,12 +3,15 @@
 ## Stato corrente
 
 - Branch: live-candidate
-- Ultimo tag tecnico: v0.2.4-sell-path-readiness
+- Versione corrente: 0.3.0-rc2
+- Ultimo tag tecnico rilevante: v0.3.0-rc2-readonly-polling
 - SELL reale: NON attiva
 - BUY reale micro: già validato
 - Slot/lotti: attivi
+- Legacy slot import: documentato
 - Paper BEST_PROFIT: validato
 - Gate SELL reale slot-based: presente
+- SELL reconciliation: preparata con chiusura slot solo dopo reconciliation OK
 
 ## Prima di qualunque test reale
 
@@ -26,6 +29,7 @@
 - [ ] liquidity_reserve_percent >= 80
 - [ ] acknowledge ultimo ordine reale già eseguito
 - [ ] position_slots controllata
+- [ ] trades legacy controllata
 - [ ] order_journal controllato
 - [ ] engine_audit controllato
 
@@ -38,16 +42,31 @@
 
 ## Modalità NON consentite ora
 
-- SELL reale
+- SELL reale autonoma
 - bot autonomo continuo
 - più ordini reali consecutivi
 - vendita wallet totale
 - uso automatico riserva
+- uso della riserva crisi per BUY ordinari
+
+## Regola slot
+
+Helix deve ragionare a slot/lotti sia in BUY sia in SELL.
+
+Gli slot vanno calcolati sul capitale operativo, non sul capitale totale:
+
+```text
+reserve_eur = total_capital_eur * reserve_percent / 100
+operational_capital_eur = total_capital_eur - reserve_eur
+slot_size_eur = operational_capital_eur / max_slots
+```
+
+La riserva crisi non deve essere consumata da acquisti ordinari.
 
 ## Prossimo obiettivo
 
-v0.3.0-rc1 guarded live slot trading
+v0.3.0-rc3 slot-aware buy sizing / capital model.
 
 ## Regola
 
-Non attivare SELL reale finché non esiste reconciliation SELL completa con chiusura slot CLOSED solo dopo FILLED.
+Non attivare SELL reale finché non esiste un test micro-live supervisionato con slot profittevole, gate espliciti e reconciliation confermata.

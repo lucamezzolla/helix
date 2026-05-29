@@ -21,7 +21,7 @@ Imported previous BTC purchases from the external Excel history into the local H
 
 ## Important distinction
 
-`position_slots` is the source of truth for slot/l lot management.
+`position_slots` is the source of truth for slot/lot management.
 
 `trades` is used as readable trade history / compatibility history.
 
@@ -39,4 +39,35 @@ Slot sizing must use operational capital, not total capital:
 reserve_eur = total_capital_eur * reserve_percent / 100
 operational_capital_eur = total_capital_eur - reserve_eur
 slot_size_eur = operational_capital_eur / max_slots
+```
 
+The crisis reserve must not be consumed by normal BUY decisions.
+
+## Operational rule
+
+Legacy slots are not orders created by Helix. They represent already-existing BTC lots imported so that Helix can evaluate the complete position correctly.
+
+For SELL decisions, Helix should compare open slots and select the best slot according to the configured strategy, never sell the whole wallet as a single undifferentiated position.
+
+For BUY decisions, Helix should not blindly consume all available EUR. It should consider:
+
+```text
+total_capital_eur = eur_balance + btc_position_value_eur
+reserve_eur = total_capital_eur * reserve_percent / 100
+operational_capital_eur = total_capital_eur - reserve_eur
+slot_size_eur = operational_capital_eur / max_slots
+```
+
+In micro-live mode, the actual BUY amount can still be capped by `micro_live.max_order_eur`.
+
+## Current baseline after import
+
+The local database baseline after the import should have:
+
+```text
+trades = 5 legacy rows
+position_slots = 6 open rows
+paper_position_slots = 0 rows
+```
+
+The database remains local and must not be committed to Git.

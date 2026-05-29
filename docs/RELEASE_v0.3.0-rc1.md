@@ -8,12 +8,12 @@ Questa è una release candidate tecnica per la futura produzione controllata.
 
 - BUY reale micro già validato
 - Reconciliation BUY reale funzionante
-- Slot/lotti reali tramite position_slots
+- Slot/lotti reali tramite `position_slots`
 - SELL preview slot-based
 - BEST_PROFIT diagnostico
 - PAPER/SIM isolato
 - Paper BEST_PROFIT funzionante
-- Gate dedicato HELIX_ALLOW_REAL_SLOT_SELL
+- Gate dedicato `HELIX_ALLOW_REAL_SLOT_SELL`
 - Lookup slot reale per SELL reconciliation
 - Chiusura slot reale preparata dopo SELL reconciliation OK
 - Documentazione pre-produzione
@@ -30,9 +30,19 @@ Questa è una release candidate tecnica per la futura produzione controllata.
 
 La SELL reale resta disabilitata finché non viene eseguito un test micro-live supervisionato con:
 
-- HELIX_ALLOW_REAL_SLOT_SELL=true
+- `HELIX_ALLOW_REAL_SLOT_SELL=true`
 - gate globali real trading true
-- STOP_AFTER_REAL_ORDER=1
-- max_orders_per_day=1
+- `STOP_AFTER_REAL_ORDER=1`
+- `max_orders_per_day=1`
 - importo micro
 - acknowledge manuale dopo ordine
+
+## Note successive
+
+Dopo questa release candidate sono stati aggiunti:
+
+- import legacy slots da storico Excel nel DB locale
+- polling readonly ridotto in `0.3.0-rc2`
+- documentazione del modello slot/capitale operativo
+
+La logica strategica successiva deve concentrarsi su BUY slot-aware e capitale operativo.
