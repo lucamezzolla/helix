@@ -75,6 +75,14 @@ static int micro_live_accumulation_buy_should_run(
 
 static int should_record_buy_exchange_safety_block(void);
 static int effective_used_slots_from_positions(const BotState *state);
+static double open_position_slots_allocated_cost_eur(void);
+static int portfolio_operational_buy_allowed(
+    const BotState *state,
+    const StrategySettings *settings,
+    double buy_amount_eur,
+    char *reason,
+    size_t reason_size
+);
 
 
 static int can_override_risk_guard_for_micro_buy(
@@ -237,6 +245,20 @@ static int micro_live_accumulation_buy_should_run(
         return 0;
     }
 
+    {
+        char portfolio_reason[256];
+
+        if (!portfolio_operational_buy_allowed(
+                state,
+                settings,
+                settings->slot_amount_eur,
+                portfolio_reason,
+                sizeof(portfolio_reason)
+            )) {
+            return 0;
+        }
+    }
+
     operational_liquidity =
         state->eur_balance * ((100.0 - settings->liquidity_reserve_percent) / 100.0);
 
@@ -289,6 +311,172 @@ static int effective_used_slots_from_positions(const BotState *state) {
     }
 
     return state->used_slots;
+}
+
+static double open_position_slots_allocated_cost_eur(void) {
+    PositionSlotRecord slots[HELIX_MAX_OPEN_POSITION_SLOTS];
+    int slot_count;
+    double total = 0.0;
+
+    memset(slots, 0, sizeof(slots));
+
+    slot_count = db_get_open_position_slots(
+        slots,
+        HELIX_MAX_OPEN_POSITION_SLOTS
+    );
+
+    for (int i = 0; i < slot_count; i++) {
+        double allocated = slots[i].cost_eur + slots[i].buy_fee_eur;
+
+        if (allocated > 0.0) {
+            total += allocated;
+        }
+    }
+
+    return total;
+}
+
+static int portfolio_operational_buy_allowed(
+    const BotState *state,
+    const StrategySettings *settings,
+    double buy_amount_eur,
+    char *reason,
+    size_t reason_size
+) {
+    double btc_value_eur;
+    double total_capital_eur;
+    double reserve_percent;
+    double reserve_eur;
+    double operational_capital_eur;
+    double theoretical_slot_eur;
+    double released_eur;
+    double effective_operational_capital_eur;
+    double allocated_cost_eur;
+    int used_slots;
+
+    if (reason != NULL && reason_size > 0) {
+        reason[0] = '\0';
+    }
+
+    if (state == NULL || settings == NULL) {
+        snprintf(reason, reason_size, "Portfolio slot BUY: stato o settings non disponibili");
+        return 0;
+    }
+
+    if (buy_amount_eur <= 0.0) {
+        snprintf(reason, reason_size, "Portfolio slot BUY: importo BUY non valido");
+        return 0;
+    }
+
+    if (settings->max_slots <= 0) {
+        snprintf(reason, reason_size, "Portfolio slot BUY: max_slots non valido");
+        return 0;
+    }
+
+    if (state->current_price <= 0.0) {
+        snprintf(reason, reason_size, "Portfolio slot BUY: prezzo corrente non valido");
+        return 0;
+    }
+
+    if (state->eur_balance + 0.000001 < buy_amount_eur) {
+        snprintf(
+            reason,
+            reason_size,
+            "Portfolio slot BUY: saldo EUR insufficiente | EUR %.2f | BUY %.2f",
+            state->eur_balance,
+            buy_amount_eur
+        );
+        return 0;
+    }
+
+    used_slots = effective_used_slots_from_positions(state);
+
+    if (used_slots >= settings->max_slots) {
+        snprintf(
+            reason,
+            reason_size,
+            "Portfolio slot BUY: slot pieni | usati %d/%d",
+            used_slots,
+            settings->max_slots
+        );
+        return 0;
+    }
+
+    btc_value_eur = state->btc_balance * state->current_price;
+    if (btc_value_eur < 0.0) {
+        btc_value_eur = 0.0;
+    }
+
+    total_capital_eur = state->eur_balance + btc_value_eur;
+
+    if (total_capital_eur <= 0.0) {
+        snprintf(reason, reason_size, "Portfolio slot BUY: capitale totale non valido");
+        return 0;
+    }
+
+    reserve_percent = settings->liquidity_reserve_percent;
+    if (reserve_percent < 0.0) {
+        reserve_percent = 0.0;
+    }
+    if (reserve_percent > 95.0) {
+        reserve_percent = 95.0;
+    }
+
+    reserve_eur = total_capital_eur * (reserve_percent / 100.0);
+    operational_capital_eur = total_capital_eur - reserve_eur;
+
+    if (operational_capital_eur < 0.0) {
+        operational_capital_eur = 0.0;
+    }
+
+    theoretical_slot_eur = operational_capital_eur / (double)settings->max_slots;
+
+    if (theoretical_slot_eur < 0.0) {
+        theoretical_slot_eur = 0.0;
+    }
+
+    released_eur = 0.0;
+    if (settings->reserve_released_slots > 0) {
+        released_eur = theoretical_slot_eur * (double)settings->reserve_released_slots;
+    }
+
+    if (released_eur > reserve_eur) {
+        released_eur = reserve_eur;
+    }
+
+    effective_operational_capital_eur = operational_capital_eur + released_eur;
+    allocated_cost_eur = open_position_slots_allocated_cost_eur();
+
+    if (allocated_cost_eur + buy_amount_eur > effective_operational_capital_eur + 0.000001) {
+        snprintf(
+            reason,
+            reason_size,
+            "Portfolio slot BUY: capitale operativo esaurito | allocato %.2f + BUY %.2f > operativo %.2f | totale %.2f | riserva %.2f | slot %d/%d",
+            allocated_cost_eur,
+            buy_amount_eur,
+            effective_operational_capital_eur,
+            total_capital_eur,
+            reserve_eur - released_eur,
+            used_slots,
+            settings->max_slots
+        );
+        return 0;
+    }
+
+    snprintf(
+        reason,
+        reason_size,
+        "Portfolio slot BUY: consentito | allocato %.2f + BUY %.2f <= operativo %.2f | totale %.2f | riserva %.2f | slot %d/%d",
+        allocated_cost_eur,
+        buy_amount_eur,
+        effective_operational_capital_eur,
+        total_capital_eur,
+        reserve_eur - released_eur,
+        used_slots,
+        settings->max_slots
+    );
+
+    return 1;
 }
 
 
@@ -1204,6 +1392,28 @@ static void audit_coinbase_order_preview_if_needed(
     }
 
     if (state->eur_balance >= settings->slot_amount_eur && settings->slot_amount_eur > 0.0) {
+        char portfolio_reason[256];
+
+        if (!portfolio_operational_buy_allowed(
+                state,
+                settings,
+                settings->slot_amount_eur,
+                portfolio_reason,
+                sizeof(portfolio_reason)
+            )) {
+            audit_engine_decision(
+                "PORTFOLIO_SLOT_BUY_PREVIEW",
+                "BLOCKED",
+                portfolio_reason,
+                state->current_price,
+                state->btc_balance,
+                settings->slot_amount_eur,
+                0.0,
+                0.0
+            );
+            return;
+        }
+
         RuntimeSafetyCheck runtime_safety = runtime_safety_check_buy(
             state,
             settings,
@@ -1943,12 +2153,43 @@ void helix_engine_tick(BotState *state) {
     }
 
     if (standard_buy_signal || micro_accumulation_buy_signal) {
+        char portfolio_reason[256];
+        double price = state->current_price;
+
+        if (!portfolio_operational_buy_allowed(
+                state,
+                &settings,
+                settings.slot_amount_eur,
+                portfolio_reason,
+                sizeof(portfolio_reason)
+            )) {
+            state->mode = BOT_MODE_READY;
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "%.120s",
+                portfolio_reason
+            );
+
+            audit_engine_decision(
+                "PORTFOLIO_SLOT_BUY",
+                "BLOCKED",
+                portfolio_reason,
+                state->current_price,
+                state->btc_balance,
+                settings.slot_amount_eur,
+                0.0,
+                0.0
+            );
+
+            return;
+        }
+
         RuntimeSafetyCheck safety = runtime_safety_check_buy(
             state,
             &settings,
             settings.slot_amount_eur
         );
-        double price = state->current_price;
 
         if (!safety.allowed) {
             state->mode = BOT_MODE_READY;
