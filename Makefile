@@ -24,6 +24,7 @@ SRC=src/main.c \
 	src/engine/post_order_reconciliation.c \
 	src/engine/prelive_validation.c \
 	src/engine/live_execution_lock.c \
+	src/engine/real_sell_supervision.c \
 	src/engine/settings.c \
 	src/engine/wallet.c \
 	src/engine/email_delivery.c src/engine/daily_report.c \

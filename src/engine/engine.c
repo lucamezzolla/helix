@@ -19,6 +19,7 @@
 #include "operational_limits.h"
 #include "risk_guard.h"
 #include "post_order_reconciliation.h"
+#include "real_sell_supervision.h"
 #include "../config/env_loader.h"
 
 #include <stdio.h>
@@ -1278,13 +1279,15 @@ static void audit_coinbase_order_preview_if_needed(
                 );
 
                 if (sell_profitable) {
-                    char real_plan_reason[420];
+                    char real_plan_reason[560];
                     int real_slot_sell_env_allowed = env_allows_real_slot_sell();
+                    RealSellSupervisionCheck one_shot_check =
+                        real_sell_supervision_check_one_shot(settings);
 
                     snprintf(
                         real_plan_reason,
                         sizeof(real_plan_reason),
-                        "REAL SELL slot-based plan pronto ma bloccato | slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%% | HELIX_ALLOW_REAL_SLOT_SELL=%s | create-order SELL reale non eseguito",
+                        "REAL SELL slot-based plan pronto ma bloccato | slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%% | HELIX_ALLOW_REAL_SLOT_SELL=%s | one-shot=%s | %.180s | create-order SELL reale non eseguito",
                         best_slot->id,
                         best_slot->base_size_btc,
                         best_gross,
@@ -1293,14 +1296,27 @@ static void audit_coinbase_order_preview_if_needed(
                         best_slot->cost_eur,
                         best_profit,
                         best_profit_percent,
-                        real_slot_sell_env_allowed ? "true" : "false"
+                        real_slot_sell_env_allowed ? "true" : "false",
+                        one_shot_check.decision,
+                        one_shot_check.reason
+                    );
+
+                    audit_engine_decision(
+                        "REAL_SLOT_SELL_ONE_SHOT_GATE",
+                        one_shot_check.decision,
+                        one_shot_check.reason,
+                        state->current_price,
+                        best_slot->base_size_btc,
+                        best_net,
+                        best_fee,
+                        best_profit
                     );
 
                     audit_engine_decision(
                         "REAL_SLOT_SELL_PLAN",
-                        real_slot_sell_env_allowed ?
+                        one_shot_check.allowed ?
                             "REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED" :
-                            "REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE",
+                            one_shot_check.decision,
                         real_plan_reason,
                         state->current_price,
                         best_slot->base_size_btc,
@@ -1311,9 +1327,9 @@ static void audit_coinbase_order_preview_if_needed(
 
                     record_blocked_preview_candidate(
                         best_plan,
-                        real_slot_sell_env_allowed ?
+                        one_shot_check.allowed ?
                             "REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED" :
-                            "REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE",
+                            one_shot_check.decision,
                         real_plan_reason
                     );
                 } else {

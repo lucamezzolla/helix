@@ -382,3 +382,28 @@ Fermare tutto se:
 Questo runbook non autorizza trading autonomo.
 
 Serve solo per il primo SELL reale supervisionato, manualmente osservato, con capitale e rischio limitati.
+
+## Gate one-shot SELL reale
+
+Dal ramo `real-sell-supervised`, Helix prepara anche un audit dedicato:
+
+```text
+REAL_SLOT_SELL_ONE_SHOT_GATE
+```
+
+Questo gate non esegue ancora il SELL reale. Serve a dichiarare se, nel momento in cui uno slot risulta profittevole, il test supervisionato sarebbe consentibile.
+
+Decisioni attese:
+
+```text
+ALLOWED_PRE_EXECUTION
+BLOCKED_ENV_GATE
+BLOCKED_NOT_LIVE_TRADING
+BLOCKED_NOT_ARMED
+BLOCKED_ALREADY_SENT_TODAY
+BLOCKED_SLOT_ALREADY_CLOSED_TODAY
+BLOCKED_AUDIT_UNAVAILABLE
+BLOCKED_SLOT_AUDIT_UNAVAILABLE
+```
+
+Per procedere verso un SELL reale supervisionato deve comparire `ALLOWED_PRE_EXECUTION` insieme a uno slot profittevole. Qualsiasi decisione `BLOCKED_*` impedisce il test reale.
