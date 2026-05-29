@@ -13,6 +13,25 @@
 #define HELIX_MAX_OPEN_POSITION_SLOTS 64
 #endif
 
+static const char *daily_report_bot_mode_to_string(BotMode mode) {
+    switch (mode) {
+        case BOT_MODE_PAUSED:
+            return "PAUSED";
+        case BOT_MODE_READY:
+            return "READY";
+        case BOT_MODE_BUYING:
+            return "BUYING";
+        case BOT_MODE_WAITING_SELL:
+            return "WAITING_SELL";
+        case BOT_MODE_SELLING:
+            return "SELLING";
+        case BOT_MODE_ERROR:
+            return "ERROR";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 #define DAILY_REPORT_BODY_SIZE 20000
 #define DAILY_REPORT_MESSAGE_SIZE 384
 #define DAILY_REPORT_LAST_DATE_KEY "email.last_daily_report_date"
@@ -193,7 +212,7 @@ static void build_daily_report_body(
             body_size,
             "== Stato attuale ==\n"
             "Running: %s\n"
-            "Mode: %d\n"
+            "Mode: %s\n"
             "EUR: %.2f\n"
             "BTC: %.8f\n"
             "Prezzo BTC/EUR: %.2f\n"
@@ -201,7 +220,7 @@ static void build_daily_report_body(
             "Slot usati: %d / %d\n"
             "Ultima operazione: %.160s\n\n",
             state->running ? "sì" : "no",
-            state->mode,
+            daily_report_bot_mode_to_string(state->mode),
             state->eur_balance,
             state->btc_balance,
             state->current_price,
