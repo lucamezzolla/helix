@@ -26,6 +26,7 @@ SRC=src/main.c \
 	src/engine/live_execution_lock.c \
 	src/engine/settings.c \
 	src/engine/wallet.c \
+	src/engine/email_delivery.c \
 	src/db/database.c \
 	src/market/market_data.c \
 	src/exchange/coinbase_client.c \

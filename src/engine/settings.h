@@ -32,6 +32,11 @@ typedef struct {
     int micro_live_stop_after_real_order;
     int micro_live_allow_accumulation;
     char micro_live_last_real_order_acknowledged[128];
+    int email_daily_enabled;
+    char email_recipient[256];
+    int email_report_hour;
+    int email_report_minute;
+    char email_sendmail_command[256];
     RuntimeMode runtime_mode;
 } StrategySettings;
 

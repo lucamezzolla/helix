@@ -55,6 +55,11 @@ static double parse_double_setting(const char *value, double fallback) {
 #define KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER "micro_live.stop_after_real_order"
 #define KEY_MICRO_LIVE_ALLOW_ACCUMULATION "micro_live.allow_accumulation"
 #define KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED "micro_live.last_real_order_acknowledged"
+#define KEY_EMAIL_DAILY_ENABLED "email.daily_enabled"
+#define KEY_EMAIL_RECIPIENT "email.recipient"
+#define KEY_EMAIL_REPORT_HOUR "email.report_hour"
+#define KEY_EMAIL_REPORT_MINUTE "email.report_minute"
+#define KEY_EMAIL_SENDMAIL_COMMAND "email.sendmail_command"
 #define KEY_RUNTIME_MODE "runtime.mode"
 
 static double get_double_setting(const char *key, double fallback) {
@@ -175,6 +180,11 @@ StrategySettings settings_default(void) {
     settings.micro_live_stop_after_real_order = 1;
     settings.micro_live_allow_accumulation = 0;
     settings.micro_live_last_real_order_acknowledged[0] = '\0';
+    settings.email_daily_enabled = 0;
+    settings.email_recipient[0] = '\0';
+    settings.email_report_hour = 12;
+    settings.email_report_minute = 0;
+    snprintf(settings.email_sendmail_command, sizeof(settings.email_sendmail_command), "%s", "sendmail -t");
     settings.runtime_mode = RUNTIME_MODE_SIMULATION;
 
     return settings;
@@ -205,6 +215,11 @@ void settings_save(StrategySettings *settings) {
     set_int_setting(KEY_MICRO_LIVE_STOP_AFTER_REAL_ORDER, settings->micro_live_stop_after_real_order ? 1 : 0);
     set_int_setting(KEY_MICRO_LIVE_ALLOW_ACCUMULATION, settings->micro_live_allow_accumulation ? 1 : 0);
     set_string_setting(KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED, settings->micro_live_last_real_order_acknowledged);
+    set_int_setting(KEY_EMAIL_DAILY_ENABLED, settings->email_daily_enabled ? 1 : 0);
+    set_string_setting(KEY_EMAIL_RECIPIENT, settings->email_recipient);
+    set_int_setting(KEY_EMAIL_REPORT_HOUR, settings->email_report_hour);
+    set_int_setting(KEY_EMAIL_REPORT_MINUTE, settings->email_report_minute);
+    set_string_setting(KEY_EMAIL_SENDMAIL_COMMAND, settings->email_sendmail_command);
     set_runtime_mode_setting(settings->runtime_mode);
 }
 
@@ -306,6 +321,26 @@ void settings_save_defaults_if_missing(void) {
 
     if (!db_get_setting(KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED, buffer, sizeof(buffer))) {
         set_string_setting(KEY_MICRO_LIVE_LAST_REAL_ORDER_ACKNOWLEDGED, defaults.micro_live_last_real_order_acknowledged);
+    }
+
+    if (!db_get_setting(KEY_EMAIL_DAILY_ENABLED, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_EMAIL_DAILY_ENABLED, defaults.email_daily_enabled);
+    }
+
+    if (!db_get_setting(KEY_EMAIL_RECIPIENT, buffer, sizeof(buffer))) {
+        set_string_setting(KEY_EMAIL_RECIPIENT, defaults.email_recipient);
+    }
+
+    if (!db_get_setting(KEY_EMAIL_REPORT_HOUR, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_EMAIL_REPORT_HOUR, defaults.email_report_hour);
+    }
+
+    if (!db_get_setting(KEY_EMAIL_REPORT_MINUTE, buffer, sizeof(buffer))) {
+        set_int_setting(KEY_EMAIL_REPORT_MINUTE, defaults.email_report_minute);
+    }
+
+    if (!db_get_setting(KEY_EMAIL_SENDMAIL_COMMAND, buffer, sizeof(buffer))) {
+        set_string_setting(KEY_EMAIL_SENDMAIL_COMMAND, defaults.email_sendmail_command);
     }
 
     if (!db_get_setting(KEY_RUNTIME_MODE, buffer, sizeof(buffer))) {
@@ -439,6 +474,46 @@ StrategySettings settings_load(void) {
 
     if (settings.micro_live_max_order_eur <= 0.0 || settings.micro_live_max_order_eur > 50.0) {
         settings.micro_live_max_order_eur = defaults.micro_live_max_order_eur;
+    }
+
+    settings.email_daily_enabled =
+        get_int_setting(KEY_EMAIL_DAILY_ENABLED, defaults.email_daily_enabled) ? 1 : 0;
+
+    get_string_setting(
+        KEY_EMAIL_RECIPIENT,
+        settings.email_recipient,
+        sizeof(settings.email_recipient),
+        defaults.email_recipient
+    );
+
+    settings.email_report_hour =
+        get_int_setting(KEY_EMAIL_REPORT_HOUR, defaults.email_report_hour);
+
+    settings.email_report_minute =
+        get_int_setting(KEY_EMAIL_REPORT_MINUTE, defaults.email_report_minute);
+
+    get_string_setting(
+        KEY_EMAIL_SENDMAIL_COMMAND,
+        settings.email_sendmail_command,
+        sizeof(settings.email_sendmail_command),
+        defaults.email_sendmail_command
+    );
+
+    if (settings.email_report_hour < 0 || settings.email_report_hour > 23) {
+        settings.email_report_hour = defaults.email_report_hour;
+    }
+
+    if (settings.email_report_minute < 0 || settings.email_report_minute > 59) {
+        settings.email_report_minute = defaults.email_report_minute;
+    }
+
+    if (settings.email_sendmail_command[0] == '\0') {
+        snprintf(
+            settings.email_sendmail_command,
+            sizeof(settings.email_sendmail_command),
+            "%s",
+            defaults.email_sendmail_command
+        );
     }
 
     settings.runtime_mode =

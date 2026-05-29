@@ -7,6 +7,7 @@
 #include "../engine/live_readiness.h"
 #include "../engine/api_health.h"
 #include "../engine/order_journal.h"
+#include "../engine/email_delivery.h"
 #include "../engine/trade_preview.h"
 #include "../exchange/coinbase_client.h"
 #include "../wallet/wallet_info.h"
@@ -16,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sqlite3.h>
 
 #define TRADE_HISTORY_LIMIT 8
 #define ENGINE_AUDIT_LIMIT 8
@@ -60,6 +62,7 @@ typedef struct {
     GtkWidget *settings_label;
     GtkWidget *status_label;
     GtkWidget *settings_expander;
+    GtkWidget *email_expander;
     GtkWidget *coinbase_expander;
     GtkWidget *history_title;
     GtkWidget *history_scrolled_window;
@@ -89,6 +92,13 @@ typedef struct {
     GtkWidget *micro_live_max_order_eur_entry;
     GtkWidget *micro_live_stop_after_real_order_entry;
     GtkWidget *micro_live_allow_accumulation_entry;
+    GtkWidget *email_daily_enabled_entry;
+    GtkWidget *email_recipient_entry;
+    GtkWidget *email_report_hour_entry;
+    GtkWidget *email_report_minute_entry;
+    GtkWidget *email_sendmail_command_entry;
+    GtkWidget *save_email_button;
+    GtkWidget *test_email_button;
     GtkWidget *emergency_stop_label;
     GtkWidget *live_trading_arm_label;
     GtkWidget *live_trading_arm_buttons_box;
@@ -499,6 +509,16 @@ static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
     return row;
 }
 
+static GtkWidget *create_section_title(const char *title) {
+    GtkWidget *label = gtk_label_new(title);
+
+    gtk_widget_add_css_class(label, "title-4");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+
+    return label;
+}
+
 static void configure_dashboard_label(GtkWidget *label) {
     if (label == NULL) {
         return;
@@ -526,6 +546,7 @@ static GtkWidget *create_main_menu_bar(void) {
 
     GMenu *preferences_menu = g_menu_new();
     g_menu_append(preferences_menu, "Impostazioni strategia", "win.show-strategy-settings");
+    g_menu_append(preferences_menu, "Email report", "win.show-email-report");
     g_menu_append(preferences_menu, "Coinbase API", "win.show-coinbase-api");
     g_menu_append_submenu(menu_bar_model, "Preferenze", G_MENU_MODEL(preferences_menu));
     g_object_unref(preferences_menu);
@@ -533,6 +554,10 @@ static GtkWidget *create_main_menu_bar(void) {
     GMenu *view_menu = g_menu_new();
     g_menu_append(view_menu, "Storico operazioni", "win.show-trade-history");
     g_menu_append(view_menu, "Audit decisioni", "win.show-engine-audit");
+    g_menu_append(view_menu, "Tabella slot reali", "win.show-position-slots-table");
+    g_menu_append(view_menu, "Tabella trades", "win.show-trades-table");
+    g_menu_append(view_menu, "Tabella order journal", "win.show-order-journal-table");
+    g_menu_append(view_menu, "Tabella engine audit", "win.show-engine-audit-table");
     g_menu_append(view_menu, "Report pre-live", "win.show-prelive-report");
     g_menu_append(view_menu, "Stato protezioni", "win.show-safety-status");
     g_menu_append(view_menu, "Simula scenario dry-run", "win.show-dryrun-scenario");
@@ -701,6 +726,19 @@ static void fill_settings_entries(AppWidgets *widgets) {
 
     snprintf(buffer, sizeof(buffer), "%d", settings.micro_live_allow_accumulation ? 1 : 0);
     gtk_editable_set_text(GTK_EDITABLE(widgets->micro_live_allow_accumulation_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%d", settings.email_daily_enabled ? 1 : 0);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->email_daily_enabled_entry), buffer);
+
+    gtk_editable_set_text(GTK_EDITABLE(widgets->email_recipient_entry), settings.email_recipient);
+
+    snprintf(buffer, sizeof(buffer), "%d", settings.email_report_hour);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->email_report_hour_entry), buffer);
+
+    snprintf(buffer, sizeof(buffer), "%d", settings.email_report_minute);
+    gtk_editable_set_text(GTK_EDITABLE(widgets->email_report_minute_entry), buffer);
+
+    gtk_editable_set_text(GTK_EDITABLE(widgets->email_sendmail_command_entry), settings.email_sendmail_command);
 
     if (widgets->emergency_stop_label != NULL) {
         gtk_label_set_text(
@@ -1353,6 +1391,107 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
     refresh_dashboard(widgets);
 }
 
+static void read_email_settings_from_entries(AppWidgets *widgets, StrategySettings *settings) {
+    if (widgets == NULL || settings == NULL) {
+        return;
+    }
+
+    settings->email_daily_enabled =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->email_daily_enabled_entry))) ? 1 : 0;
+
+    snprintf(
+        settings->email_recipient,
+        sizeof(settings->email_recipient),
+        "%s",
+        gtk_editable_get_text(GTK_EDITABLE(widgets->email_recipient_entry))
+    );
+
+    settings->email_report_hour =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->email_report_hour_entry)));
+
+    settings->email_report_minute =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->email_report_minute_entry)));
+
+    snprintf(
+        settings->email_sendmail_command,
+        sizeof(settings->email_sendmail_command),
+        "%s",
+        gtk_editable_get_text(GTK_EDITABLE(widgets->email_sendmail_command_entry))
+    );
+}
+
+static int email_settings_are_valid(const StrategySettings *settings, char *message, size_t message_size) {
+    if (settings == NULL) {
+        snprintf(message, message_size, "Email report: settings non disponibili");
+        return 0;
+    }
+
+    if (settings->email_report_hour < 0 || settings->email_report_hour > 23) {
+        snprintf(message, message_size, "Email report: ora non valida, usare 0-23");
+        return 0;
+    }
+
+    if (settings->email_report_minute < 0 || settings->email_report_minute > 59) {
+        snprintf(message, message_size, "Email report: minuto non valido, usare 0-59");
+        return 0;
+    }
+
+    if (settings->email_recipient[0] == '\0') {
+        snprintf(message, message_size, "Email report: destinatario mancante");
+        return 0;
+    }
+
+    if (settings->email_sendmail_command[0] == '\0') {
+        snprintf(message, message_size, "Email report: comando invio mancante");
+        return 0;
+    }
+
+    snprintf(message, message_size, "Email report: impostazioni valide");
+    return 1;
+}
+
+static void on_save_email_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+    StrategySettings settings = settings_load();
+    char message[256];
+
+    if (widgets == NULL) {
+        return;
+    }
+
+    read_email_settings_from_entries(widgets, &settings);
+
+    if (!email_settings_are_valid(&settings, message, sizeof(message))) {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+        return;
+    }
+
+    settings_save(&settings);
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze email salvate");
+}
+
+static void on_test_email_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+    StrategySettings settings = settings_load();
+    char message[256];
+
+    if (widgets == NULL) {
+        return;
+    }
+
+    settings_save(&settings);
+
+    if (email_delivery_send_test(&settings, message, sizeof(message))) {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+    } else {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), message);
+    }
+}
+
 static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
     (void)button;
 
@@ -1422,6 +1561,29 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
 
     settings.micro_live_allow_accumulation =
         atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->micro_live_allow_accumulation_entry))) ? 1 : 0;
+
+    settings.email_daily_enabled =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->email_daily_enabled_entry))) ? 1 : 0;
+
+    snprintf(
+        settings.email_recipient,
+        sizeof(settings.email_recipient),
+        "%s",
+        gtk_editable_get_text(GTK_EDITABLE(widgets->email_recipient_entry))
+    );
+
+    settings.email_report_hour =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->email_report_hour_entry)));
+
+    settings.email_report_minute =
+        atoi(gtk_editable_get_text(GTK_EDITABLE(widgets->email_report_minute_entry)));
+
+    snprintf(
+        settings.email_sendmail_command,
+        sizeof(settings.email_sendmail_command),
+        "%s",
+        gtk_editable_get_text(GTK_EDITABLE(widgets->email_sendmail_command_entry))
+    );
 
     settings.runtime_mode =
         get_selected_runtime_mode(widgets->runtime_mode_dropdown);
@@ -1843,6 +2005,151 @@ static void show_dryrun_scenario_dialog(AppWidgets *widgets) {
 }
 
 
+
+static GtkWidget *create_table_cell_label(const char *text, gboolean header) {
+    GtkWidget *label = gtk_label_new(text ? text : "");
+
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_yalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_selectable(GTK_LABEL(label), TRUE);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), header ? 28 : 44);
+
+    gtk_widget_set_margin_top(label, 4);
+    gtk_widget_set_margin_bottom(label, 4);
+    gtk_widget_set_margin_start(label, 6);
+    gtk_widget_set_margin_end(label, 6);
+
+    if (header) {
+        gtk_widget_add_css_class(label, "heading");
+    }
+
+    return label;
+}
+
+static void show_sql_table_window(
+    AppWidgets *widgets,
+    const char *title,
+    const char *sql,
+    int default_width,
+    int default_height
+) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    GtkWidget *window;
+    GtkWidget *root_box;
+    GtkWidget *scrolled_window;
+    GtkWidget *grid;
+    GtkWidget *footer_box;
+    GtkWidget *close_button;
+    GtkWidget *status_label;
+    int column_count;
+    int row = 1;
+    int sqlite_rc;
+
+    if (widgets == NULL || widgets->window == NULL || sql == NULL) {
+        return;
+    }
+
+    if (sqlite3_open("data/helix.db", &db) != SQLITE_OK) {
+        show_text_dialog(widgets, title, "Impossibile aprire data/helix.db");
+        return;
+    }
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        char error_message[512];
+
+        snprintf(
+            error_message,
+            sizeof(error_message),
+            "Errore SQL: %.420s",
+            sqlite3_errmsg(db)
+        );
+
+        sqlite3_close(db);
+        show_text_dialog(widgets, title, error_message);
+        return;
+    }
+
+    column_count = sqlite3_column_count(stmt);
+
+    window = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(window), title ? title : "Tabella Helix");
+    gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(widgets->window));
+    gtk_window_set_default_size(GTK_WINDOW(window), default_width, default_height);
+
+    root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(root_box, 12);
+    gtk_widget_set_margin_bottom(root_box, 12);
+    gtk_widget_set_margin_start(root_box, 12);
+    gtk_widget_set_margin_end(root_box, 12);
+
+    scrolled_window = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(
+        GTK_SCROLLED_WINDOW(scrolled_window),
+        GTK_POLICY_AUTOMATIC,
+        GTK_POLICY_AUTOMATIC
+    );
+    gtk_widget_set_vexpand(scrolled_window, TRUE);
+    gtk_widget_set_hexpand(scrolled_window, TRUE);
+
+    grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 2);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+
+    for (int col = 0; col < column_count; col++) {
+        GtkWidget *cell = create_table_cell_label(sqlite3_column_name(stmt, col), TRUE);
+        gtk_grid_attach(GTK_GRID(grid), cell, col, 0, 1, 1);
+    }
+
+    while ((sqlite_rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        for (int col = 0; col < column_count; col++) {
+            const unsigned char *value = sqlite3_column_text(stmt, col);
+            GtkWidget *cell = create_table_cell_label(value ? (const char *)value : "", FALSE);
+            gtk_grid_attach(GTK_GRID(grid), cell, col, row, 1, 1);
+        }
+
+        row++;
+    }
+
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), grid);
+
+    footer_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(footer_box, GTK_ALIGN_END);
+
+    {
+        char status_text[128];
+
+        if (sqlite_rc == SQLITE_DONE) {
+            snprintf(status_text, sizeof(status_text), "Righe visualizzate: %d", row - 1);
+        } else {
+            snprintf(status_text, sizeof(status_text), "Righe visualizzate: %d | errore lettura", row - 1);
+        }
+
+        status_label = gtk_label_new(status_text);
+    }
+
+    close_button = gtk_button_new_with_label("Chiudi");
+
+    gtk_box_append(GTK_BOX(footer_box), status_label);
+    gtk_box_append(GTK_BOX(footer_box), close_button);
+
+    gtk_box_append(GTK_BOX(root_box), scrolled_window);
+    gtk_box_append(GTK_BOX(root_box), footer_box);
+
+    gtk_window_set_child(GTK_WINDOW(window), root_box);
+
+    g_signal_connect_swapped(close_button, "clicked", G_CALLBACK(gtk_window_close), window);
+    g_signal_connect(window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    gtk_window_present(GTK_WINDOW(window));
+}
+
+
+
 static void on_menu_start_bot_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action;
     (void)parameter;
@@ -1881,6 +2188,21 @@ static void on_menu_show_strategy_settings_action(GSimpleAction *action, GVarian
     fill_settings_entries(widgets);
     present_utility_window(widgets->settings_expander);
     gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze: impostazioni strategia aperte");
+}
+
+static void on_menu_show_email_report_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->email_expander == NULL) {
+        return;
+    }
+
+    fill_settings_entries(widgets);
+    present_utility_window(widgets->email_expander);
+    gtk_label_set_text(GTK_LABEL(widgets->status_label), "Preferenze: email report aperte");
 }
 
 static void on_menu_show_coinbase_api_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -1927,6 +2249,103 @@ static void on_menu_show_engine_audit_action(GSimpleAction *action, GVariant *pa
     present_utility_window(widgets->audit_scrolled_window);
     gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: audit decisioni aperto");
 }
+
+
+static void on_menu_show_position_slots_table_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    show_sql_table_window(
+        widgets,
+        "Tabella slot reali",
+        "SELECT id, buy_order_id, buy_client_order_id, base_size_btc, cost_eur, "
+        "buy_fee_eur, cost_eur + buy_fee_eur AS allocated_cost, avg_buy_price, "
+        "status, opened_at, closed_at, sell_order_id, sell_net_eur, realized_profit_eur "
+        "FROM position_slots "
+        "ORDER BY opened_at ASC, id ASC "
+        "LIMIT 200;",
+        1180,
+        560
+    );
+
+    if (widgets != NULL && widgets->status_label != NULL) {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella slot reali aperta");
+    }
+}
+
+static void on_menu_show_trades_table_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    show_sql_table_window(
+        widgets,
+        "Tabella trades",
+        "SELECT id, type, price, eur_amount, btc_amount, fee_amount, net_total, "
+        "reference, source, created_at "
+        "FROM trades "
+        "ORDER BY datetime(created_at) DESC, id DESC "
+        "LIMIT 200;",
+        1060,
+        520
+    );
+
+    if (widgets != NULL && widgets->status_label != NULL) {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella trades aperta");
+    }
+}
+
+static void on_menu_show_order_journal_table_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    show_sql_table_window(
+        widgets,
+        "Tabella order journal",
+        "SELECT id, client_order_id, side, dry_run, status, phase, decision, "
+        "requested_quote_size, requested_base_size, preview_total_eur, preview_fee_eur, "
+        "preview_base_size, preview_avg_price, coinbase_order_id, execution_decision, "
+        "substr(reason, 1, 160) AS reason, created_at "
+        "FROM order_journal "
+        "ORDER BY id DESC "
+        "LIMIT 200;",
+        1280,
+        620
+    );
+
+    if (widgets != NULL && widgets->status_label != NULL) {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella order journal aperta");
+    }
+}
+
+static void on_menu_show_engine_audit_table_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    show_sql_table_window(
+        widgets,
+        "Tabella engine audit",
+        "SELECT id, created_at, event_type, decision, price, btc_amount, eur_amount, "
+        "estimated_fee, net_profit, substr(reason, 1, 180) AS reason "
+        "FROM engine_audit "
+        "ORDER BY id DESC "
+        "LIMIT 200;",
+        1180,
+        620
+    );
+
+    if (widgets != NULL && widgets->status_label != NULL) {
+        gtk_label_set_text(GTK_LABEL(widgets->status_label), "Visualizza: tabella engine audit aperta");
+    }
+}
+
 
 static void build_prelive_report_message(AppWidgets *widgets, char *message, size_t message_size) {
     if (message == NULL || message_size == 0) {
@@ -2490,6 +2909,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *settings_expander;
     GtkWidget *settings_box;
     GtkWidget *settings_dialog_scrolled_window;
+    GtkWidget *email_expander;
+    GtkWidget *email_box;
+    GtkWidget *email_dialog_scrolled_window;
     GtkWidget *slot_amount_entry;
     GtkWidget *buy_drop_entry;
     GtkWidget *sell_profit_entry;
@@ -2511,6 +2933,14 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *micro_live_max_order_eur_entry;
     GtkWidget *micro_live_stop_after_real_order_entry;
     GtkWidget *micro_live_allow_accumulation_entry;
+    GtkWidget *email_daily_enabled_entry;
+    GtkWidget *email_recipient_entry;
+    GtkWidget *email_report_hour_entry;
+    GtkWidget *email_report_minute_entry;
+    GtkWidget *email_sendmail_command_entry;
+    GtkWidget *email_buttons_box;
+    GtkWidget *save_email_button;
+    GtkWidget *test_email_button;
     GtkWidget *emergency_stop_label;
     GtkWidget *live_trading_arm_label;
     GtkWidget *live_trading_arm_buttons_box;
@@ -2663,6 +3093,11 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     micro_live_max_order_eur_entry = gtk_entry_new();
     micro_live_stop_after_real_order_entry = gtk_entry_new();
     micro_live_allow_accumulation_entry = gtk_entry_new();
+    email_daily_enabled_entry = gtk_entry_new();
+    email_recipient_entry = gtk_entry_new();
+    email_report_hour_entry = gtk_entry_new();
+    email_report_minute_entry = gtk_entry_new();
+    email_sendmail_command_entry = gtk_entry_new();
 
     const char *runtime_modes[] = {
         "SIMULATION",
@@ -2674,6 +3109,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     runtime_mode_dropdown = gtk_drop_down_new_from_strings(runtime_modes);
 
     save_settings_button = gtk_button_new_with_label("Salva impostazioni");
+
+    email_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    save_email_button = gtk_button_new_with_label("Salva preferenze email");
+    test_email_button = gtk_button_new_with_label("Test consegna email");
+    gtk_box_append(GTK_BOX(email_buttons_box), save_email_button);
+    gtk_box_append(GTK_BOX(email_buttons_box), test_email_button);
 
     emergency_stop_label = gtk_label_new("");
     gtk_widget_set_halign(emergency_stop_label, GTK_ALIGN_START);
@@ -2731,6 +3172,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Micro-live max ordine EUR", micro_live_max_order_eur_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Stop dopo ordine reale (0/1)", micro_live_stop_after_real_order_entry));
     gtk_box_append(GTK_BOX(settings_box), create_setting_row("Consenti accumulo micro-live (0/1)", micro_live_allow_accumulation_entry));
+
     gtk_box_append(GTK_BOX(settings_box), emergency_stop_label);
     gtk_box_append(GTK_BOX(settings_box), emergency_buttons_box);
     gtk_box_append(GTK_BOX(settings_box), live_trading_arm_label);
@@ -2741,6 +3183,35 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
 
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(settings_dialog_scrolled_window), settings_box);
     gtk_window_set_child(GTK_WINDOW(settings_expander), settings_dialog_scrolled_window);
+
+    email_expander = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(email_expander), "Email report");
+    gtk_window_set_transient_for(GTK_WINDOW(email_expander), GTK_WINDOW(window));
+    gtk_window_set_modal(GTK_WINDOW(email_expander), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(email_expander), 760, 360);
+    g_signal_connect(email_expander, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
+
+    email_dialog_scrolled_window = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(email_dialog_scrolled_window, TRUE);
+
+    email_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(email_box, 10);
+    gtk_widget_set_margin_bottom(email_box, 10);
+    gtk_widget_set_margin_start(email_box, 10);
+    gtk_widget_set_margin_end(email_box, 10);
+
+    gtk_box_append(GTK_BOX(email_box), create_section_title("Email report giornaliero"));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row("Email giornaliera attiva (0/1)", email_daily_enabled_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row("Destinatario email", email_recipient_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row("Ora report email (0-23)", email_report_hour_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row("Minuto report email (0-59)", email_report_minute_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row("Comando invio email", email_sendmail_command_entry));
+    gtk_box_append(GTK_BOX(email_box), create_section_title("Test consegna"));
+    gtk_box_append(GTK_BOX(email_box), gtk_label_new("Il test usa il comando configurato, ad esempio: sendmail -t. Se msmtp non è configurato, il test fallirà con il dettaglio dell'errore."));
+    gtk_box_append(GTK_BOX(email_box), email_buttons_box);
+
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(email_dialog_scrolled_window), email_box);
+    gtk_window_set_child(GTK_WINDOW(email_expander), email_dialog_scrolled_window);
 
     coinbase_expander = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(coinbase_expander), "Coinbase API");
@@ -2862,6 +3333,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->settings_label = settings_label;
     widgets->status_label = status_label;
     widgets->settings_expander = settings_expander;
+    widgets->email_expander = email_expander;
     widgets->coinbase_expander = coinbase_expander;
     widgets->history_title = history_title;
     widgets->history_scrolled_window = history_window;
@@ -2890,6 +3362,13 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->micro_live_max_order_eur_entry = micro_live_max_order_eur_entry;
     widgets->micro_live_stop_after_real_order_entry = micro_live_stop_after_real_order_entry;
     widgets->micro_live_allow_accumulation_entry = micro_live_allow_accumulation_entry;
+    widgets->email_daily_enabled_entry = email_daily_enabled_entry;
+    widgets->email_recipient_entry = email_recipient_entry;
+    widgets->email_report_hour_entry = email_report_hour_entry;
+    widgets->email_report_minute_entry = email_report_minute_entry;
+    widgets->email_sendmail_command_entry = email_sendmail_command_entry;
+    widgets->save_email_button = save_email_button;
+    widgets->test_email_button = test_email_button;
     widgets->emergency_stop_label = emergency_stop_label;
     widgets->live_trading_arm_label = live_trading_arm_label;
     widgets->live_trading_arm_buttons_box = live_trading_arm_buttons_box;
@@ -2921,6 +3400,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
             .activate = on_menu_show_strategy_settings_action
         },
         {
+            .name = "show-email-report",
+            .activate = on_menu_show_email_report_action
+        },
+        {
             .name = "show-coinbase-api",
             .activate = on_menu_show_coinbase_api_action
         },
@@ -2931,6 +3414,22 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
         {
             .name = "show-engine-audit",
             .activate = on_menu_show_engine_audit_action
+        },
+        {
+            .name = "show-position-slots-table",
+            .activate = on_menu_show_position_slots_table_action
+        },
+        {
+            .name = "show-trades-table",
+            .activate = on_menu_show_trades_table_action
+        },
+        {
+            .name = "show-order-journal-table",
+            .activate = on_menu_show_order_journal_table_action
+        },
+        {
+            .name = "show-engine-audit-table",
+            .activate = on_menu_show_engine_audit_table_action
         },
         {
             .name = "show-prelive-report",
@@ -2974,6 +3473,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     refresh_dashboard(widgets);
 
     g_signal_connect(save_settings_button, "clicked", G_CALLBACK(on_save_settings_clicked), widgets);
+    g_signal_connect(save_email_button, "clicked", G_CALLBACK(on_save_email_clicked), widgets);
+    g_signal_connect(test_email_button, "clicked", G_CALLBACK(on_test_email_clicked), widgets);
     g_signal_connect(activate_emergency_stop_button, "clicked", G_CALLBACK(on_activate_emergency_stop_clicked), widgets);
     g_signal_connect(reset_emergency_stop_button, "clicked", G_CALLBACK(on_reset_emergency_stop_clicked), widgets);
     g_signal_connect(arm_live_trading_button, "clicked", G_CALLBACK(on_arm_live_trading_clicked), widgets);
