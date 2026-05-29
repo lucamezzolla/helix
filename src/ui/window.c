@@ -8,6 +8,7 @@
 #include "../engine/api_health.h"
 #include "../engine/order_journal.h"
 #include "../engine/email_delivery.h"
+#include "../engine/daily_report.h"
 #include "../engine/trade_preview.h"
 #include "../exchange/coinbase_client.h"
 #include "../wallet/wallet_info.h"
@@ -2862,6 +2863,16 @@ static gboolean on_engine_timer(gpointer user_data) {
 
     if (widgets == NULL || widgets->shutting_down || widgets->state == NULL) {
         return G_SOURCE_REMOVE;
+    }
+
+    {
+        StrategySettings settings = settings_load();
+
+        /*
+         * Il report giornaliero è osservativo: deve poter partire anche
+         * se Helix è aperto ma il bot non è running.
+         */
+        daily_report_maybe_send(widgets->state, &settings);
     }
 
     helix_engine_tick(widgets->state);

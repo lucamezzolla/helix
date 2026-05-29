@@ -31,6 +31,120 @@ static void set_message(char *message, int message_size, const char *text) {
     snprintf(message, (size_t)message_size, "%s", text ? text : "");
 }
 
+int email_delivery_send_message(
+    const StrategySettings *settings,
+    const char *subject,
+    const char *body,
+    char *message,
+    int message_size
+) {
+    FILE *pipe;
+    int rc;
+    const char *command;
+    char command_with_stderr[512];
+    char error_buffer[192];
+    const char *error_path = "/tmp/helix_email_delivery_last_error.log";
+
+    if (settings == NULL) {
+        set_message(message, message_size, "Email: settings non disponibili");
+        return 0;
+    }
+
+    if (!settings->email_daily_enabled) {
+        set_message(message, message_size, "Email: invio email disabilitato nelle impostazioni");
+        return 0;
+    }
+
+    if (!has_basic_email_shape(settings->email_recipient)) {
+        set_message(message, message_size, "Email: destinatario non valido o mancante");
+        return 0;
+    }
+
+    if (subject == NULL || subject[0] == '\0') {
+        set_message(message, message_size, "Email: oggetto mancante");
+        return 0;
+    }
+
+    if (body == NULL || body[0] == '\0') {
+        set_message(message, message_size, "Email: corpo messaggio mancante");
+        return 0;
+    }
+
+    command = settings->email_sendmail_command[0] != '\0' ?
+        settings->email_sendmail_command :
+        "sendmail -t";
+
+    remove(error_path);
+
+    snprintf(
+        command_with_stderr,
+        sizeof(command_with_stderr),
+        "%s 2> %s",
+        command,
+        error_path
+    );
+
+    pipe = popen(command_with_stderr, "w");
+    if (pipe == NULL) {
+        set_message(message, message_size, "Email: impossibile avviare comando sendmail/msmtp");
+        return 0;
+    }
+
+    fprintf(pipe, "To: %s\n", settings->email_recipient);
+    fprintf(pipe, "Subject: %s\n", subject);
+    fprintf(pipe, "Content-Type: text/plain; charset=UTF-8\n");
+    fprintf(pipe, "\n");
+    fprintf(pipe, "%s\n", body);
+
+    rc = pclose(pipe);
+
+    if (rc == -1) {
+        set_message(message, message_size, "Email: errore chiusura comando invio");
+        return 0;
+    }
+
+    if (WIFEXITED(rc) && WEXITSTATUS(rc) == 0) {
+        snprintf(
+            message,
+            (size_t)message_size,
+            "Email inviata a %s",
+            settings->email_recipient
+        );
+        return 1;
+    }
+
+    error_buffer[0] = '\0';
+
+    {
+        FILE *error_file = fopen(error_path, "r");
+
+        if (error_file != NULL) {
+            size_t bytes_read = fread(error_buffer, 1, sizeof(error_buffer) - 1, error_file);
+            error_buffer[bytes_read] = '\0';
+            fclose(error_file);
+        }
+    }
+
+    if (error_buffer[0] != '\0') {
+        snprintf(
+            message,
+            (size_t)message_size,
+            "Email fallita: codice %d | %.150s",
+            WIFEXITED(rc) ? WEXITSTATUS(rc) : rc,
+            error_buffer
+        );
+    } else {
+        snprintf(
+            message,
+            (size_t)message_size,
+            "Email fallita: comando invio terminato con codice %d",
+            WIFEXITED(rc) ? WEXITSTATUS(rc) : rc
+        );
+    }
+
+    return 0;
+}
+
 int email_delivery_send_test(
     const StrategySettings *settings,
     char *message,
