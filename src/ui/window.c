@@ -158,6 +158,21 @@ static void load_app_css(void) {
     );
 
     g_object_unref(provider);
+
+    {
+        GtkCssProvider *theme_provider = gtk_css_provider_new();
+        const char *theme_path = "assets/helix_dracula.css";
+
+        gtk_css_provider_load_from_path(theme_provider, theme_path);
+
+        gtk_style_context_add_provider_for_display(
+            gdk_display_get_default(),
+            GTK_STYLE_PROVIDER(theme_provider),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1
+        );
+
+        g_object_unref(theme_provider);
+    }
 }
 
 static const char *bot_mode_to_string(BotMode mode) {

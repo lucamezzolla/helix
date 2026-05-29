@@ -1112,3 +1112,14 @@ confermato manualmente dall'utente
 ```
 
 Fino ad allora, Helix resta una release tecnica/pre-prod controllata.
+
+---
+
+## Tema grafico Dracula
+
+Helix include un tema GTK4 ispirato alla palette Dracula.
+
+Il file del tema si trova in:
+
+```text
+assets/helix_dracula.css

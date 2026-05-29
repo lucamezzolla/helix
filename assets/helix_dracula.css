@@ -1,0 +1,138 @@
+/*
+ * Helix Dracula Theme
+ * Palette inspired by Dracula:
+ * background  #282a36
+ * current     #44475a
+ * foreground  #f8f8f2
+ * comment     #6272a4
+ * cyan        #8be9fd
+ * green       #50fa7b
+ * orange      #ffb86c
+ * pink        #ff79c6
+ * purple      #bd93f9
+ * red         #ff5555
+ * yellow      #f1fa8c
+ */
+
+window,
+dialog {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+box,
+grid,
+scrolledwindow,
+viewport {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+label {
+  color: #f8f8f2;
+}
+
+entry {
+  background: #44475a;
+  color: #f8f8f2;
+  border: 1px solid #6272a4;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+entry:focus {
+  border-color: #bd93f9;
+}
+
+button {
+  background: #44475a;
+  color: #f8f8f2;
+  border: 1px solid #6272a4;
+  border-radius: 8px;
+  padding: 7px 12px;
+}
+
+button:hover {
+  background: #6272a4;
+}
+
+button:active {
+  background: #bd93f9;
+  color: #282a36;
+}
+
+menubutton,
+popover,
+popover contents {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+list,
+listview,
+columnview,
+treeview {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+row {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+row:hover {
+  background: #44475a;
+}
+
+headerbar {
+  background: #21222c;
+  color: #f8f8f2;
+}
+
+.dashboard-label {
+  font-size: 1.14em;
+  line-height: 1.35;
+  color: #f8f8f2;
+}
+
+.section-title {
+  font-size: 1.16em;
+  font-weight: bold;
+  color: #bd93f9;
+}
+
+.credentials-ok {
+  color: #50fa7b;
+  font-weight: bold;
+}
+
+.credentials-missing {
+  color: #ffb86c;
+  font-weight: bold;
+}
+
+.line-online {
+  color: #50fa7b;
+  font-weight: bold;
+}
+
+.line-offline {
+  color: #ff5555;
+  font-weight: bold;
+}
+
+.warning-label {
+  color: #ffb86c;
+  font-weight: bold;
+}
+
+.error-label {
+  color: #ff5555;
+  font-weight: bold;
+}
+
+.success-label {
+  color: #50fa7b;
+  font-weight: bold;
+}
