@@ -280,7 +280,7 @@ static gboolean clear_temporary_status_message(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-static void show_action_dialog(AppWidgets *widgets, const char *message) {
+static void show_action_dialog_typed(AppWidgets *widgets, const char *title_text, const char *message, const char *css_class) {
     GtkWidget *dialog;
     GtkWidget *box;
     GtkWidget *title;
@@ -299,24 +299,28 @@ static void show_action_dialog(AppWidgets *widgets, const char *message) {
     dialog = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(dialog), "Helix");
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 360, 145);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 340, 135);
     gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
 
     if (parent != NULL) {
         gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
     }
 
-    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_add_css_class(box, "helix-action-dialog");
-    gtk_widget_set_margin_top(box, 16);
-    gtk_widget_set_margin_bottom(box, 16);
-    gtk_widget_set_margin_start(box, 18);
-    gtk_widget_set_margin_end(box, 18);
+    if (css_class != NULL && css_class[0] != '\0') {
+        gtk_widget_add_css_class(box, css_class);
+    }
+    gtk_widget_set_margin_top(box, 18);
+    gtk_widget_set_margin_bottom(box, 18);
+    gtk_widget_set_margin_start(box, 22);
+    gtk_widget_set_margin_end(box, 22);
 
-    title = gtk_label_new("Helix");
+    title = gtk_label_new(title_text != NULL ? title_text : "Helix");
     gtk_widget_add_css_class(title, "helix-action-dialog-title");
     gtk_label_set_xalign(GTK_LABEL(title), 0.5f);
-    gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
+    gtk_label_set_justify(GTK_LABEL(title), GTK_JUSTIFY_CENTER);
+    gtk_widget_set_halign(title, GTK_ALIGN_FILL);
 
     label = gtk_label_new(message);
     gtk_widget_add_css_class(label, "helix-action-dialog-message");
@@ -324,7 +328,7 @@ static void show_action_dialog(AppWidgets *widgets, const char *message) {
     gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
     gtk_label_set_xalign(GTK_LABEL(label), 0.5f);
     gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
-    gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(label, GTK_ALIGN_FILL);
 
     button = gtk_button_new_with_label("OK");
     gtk_widget_add_css_class(button, "dialog-action-button");
@@ -338,6 +342,18 @@ static void show_action_dialog(AppWidgets *widgets, const char *message) {
 
     gtk_window_set_child(GTK_WINDOW(dialog), box);
     gtk_window_present(GTK_WINDOW(dialog));
+}
+
+static void show_action_info_dialog(AppWidgets *widgets, const char *message) {
+    show_action_dialog_typed(widgets, "Operazione completata", message, "helix-action-info");
+}
+
+static void show_action_warning_dialog(AppWidgets *widgets, const char *message) {
+    show_action_dialog_typed(widgets, "Attenzione", message, "helix-action-warning");
+}
+
+static void show_action_error_dialog(AppWidgets *widgets, const char *message) {
+    show_action_dialog_typed(widgets, "Errore", message, "helix-action-error");
 }
 
 static void set_temporary_status_message(AppWidgets *widgets, const char *message) {
@@ -998,18 +1014,18 @@ static void on_save_coinbase_clicked(GtkButton *button, gpointer user_data) {
         strlen(api_secret) == 0
     ) {
         set_temporary_status_message(widgets, "Errore: API Key e API Secret sono obbligatorie");
-    show_action_dialog(widgets, "Errore: API Key e API Secret sono obbligatorie");
+    show_action_error_dialog(widgets, "Errore: API Key e API Secret sono obbligatorie");
         return;
     }
 
     if (!env_save_coinbase_credentials(api_key, api_secret)) {
         set_temporary_status_message(widgets, "Errore: impossibile salvare .env");
-    show_action_dialog(widgets, "Errore: impossibile salvare .env");
+    show_action_error_dialog(widgets, "Errore: impossibile salvare .env");
         return;
     }
 
     set_temporary_status_message(widgets, "Credenziali Coinbase salvate in .env");
-    show_action_dialog(widgets, "Credenziali Coinbase salvate in .env");
+    show_action_info_dialog(widgets, "Credenziali Coinbase salvate in .env");
 
     refresh_dashboard(widgets);
 }
@@ -1027,7 +1043,7 @@ static void on_release_reserve_slot_clicked(GtkButton *button, gpointer user_dat
 
     if (settings.reserve_released_slots >= settings.max_slots) {
         set_temporary_status_message(widgets, "Riserva: tutti gli slot risultano già sbloccati");
-    show_action_dialog(widgets, "Riserva: tutti gli slot risultano già sbloccati");
+    show_action_warning_dialog(widgets, "Riserva: tutti gli slot risultano già sbloccati");
         return;
     }
 
@@ -1054,7 +1070,7 @@ static void on_release_reserve_slot_clicked(GtkButton *button, gpointer user_dat
     );
 
     set_temporary_status_message(widgets, reason);
-    show_action_dialog(widgets, reason);
+    show_action_info_dialog(widgets, reason);
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
 }
@@ -1072,7 +1088,7 @@ static void on_lock_reserve_slot_clicked(GtkButton *button, gpointer user_data) 
 
     if (settings.reserve_released_slots <= 0) {
         set_temporary_status_message(widgets, "Riserva: nessuno slot riserva da ribloccare");
-    show_action_dialog(widgets, "Riserva: nessuno slot riserva da ribloccare");
+    show_action_warning_dialog(widgets, "Riserva: nessuno slot riserva da ribloccare");
         return;
     }
 
@@ -1099,7 +1115,7 @@ static void on_lock_reserve_slot_clicked(GtkButton *button, gpointer user_data) 
     );
 
     set_temporary_status_message(widgets, reason);
-    show_action_dialog(widgets, reason);
+    show_action_info_dialog(widgets, reason);
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
 }
@@ -1135,7 +1151,7 @@ static void on_activate_emergency_stop_clicked(GtkButton *button, gpointer user_
     );
 
     set_temporary_status_message(widgets, "Emergency stop attivato: bot fermo e operazioni bloccate");
-    show_action_dialog(widgets, "Emergency stop attivato: bot fermo e operazioni bloccate");
+    show_action_warning_dialog(widgets, "Emergency stop attivato: bot fermo e operazioni bloccate");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1164,7 +1180,7 @@ static void on_reset_emergency_stop_clicked(GtkButton *button, gpointer user_dat
     );
 
     set_temporary_status_message(widgets, "Emergency stop resettato: il bot resta fermo finché non premi Start");
-    show_action_dialog(widgets, "Emergency stop resettato: il bot resta fermo finché non premi Start");
+    show_action_info_dialog(widgets, "Emergency stop resettato: il bot resta fermo finché non premi Start");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1183,7 +1199,7 @@ static void on_arm_live_trading_clicked(GtkButton *button, gpointer user_data) {
 
     if (settings.emergency_stop_enabled) {
         set_temporary_status_message(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
-    show_action_dialog(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
+    show_action_warning_dialog(widgets, "LIVE_TRADING arm bloccato: kill-switch attivo");
         return;
     }
 
@@ -1202,7 +1218,7 @@ static void on_arm_live_trading_clicked(GtkButton *button, gpointer user_data) {
     );
 
     set_temporary_status_message(widgets, "LIVE_TRADING armato: invio ordini reali ancora bloccato dal codice");
-    show_action_dialog(widgets, "LIVE_TRADING armato: invio ordini reali ancora bloccato dal codice");
+    show_action_warning_dialog(widgets, "LIVE_TRADING armato: invio ordini reali ancora bloccato dal codice");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1233,7 +1249,7 @@ static void on_disarm_live_trading_clicked(GtkButton *button, gpointer user_data
     );
 
     set_temporary_status_message(widgets, "LIVE_TRADING disarmato");
-    show_action_dialog(widgets, "LIVE_TRADING disarmato");
+    show_action_info_dialog(widgets, "LIVE_TRADING disarmato");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1254,7 +1270,7 @@ static void on_acknowledge_real_order_clicked(GtkButton *button, gpointer user_d
 
     if (!order_journal_get_latest_real_sent_order_id(latest_order_id, sizeof(latest_order_id))) {
         set_temporary_status_message(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
-    show_action_dialog(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
+    show_action_warning_dialog(widgets, "Nessun ordine reale REAL_SENT da riconoscere");
         return;
     }
 
@@ -1289,7 +1305,7 @@ static void on_acknowledge_real_order_clicked(GtkButton *button, gpointer user_d
     );
 
     set_temporary_status_message(widgets, "Ultimo ordine reale riconosciuto: Helix può essere riarmato dopo revisione");
-    show_action_dialog(widgets, "Ultimo ordine reale riconosciuto: Helix può essere riarmato dopo revisione");
+    show_action_info_dialog(widgets, "Ultimo ordine reale riconosciuto: Helix può essere riarmato dopo revisione");
 
     fill_settings_entries(widgets);
     refresh_dashboard(widgets);
@@ -1328,7 +1344,13 @@ static void on_seed_paper_slots_clicked(GtkButton *button, gpointer user_data) {
     );
 
     set_temporary_status_message(widgets, message);
-    show_action_dialog(widgets, message);
+    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
+        show_action_error_dialog(widgets, message);
+    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
+        show_action_warning_dialog(widgets, message);
+    } else {
+        show_action_info_dialog(widgets, message);
+    }
 
     refresh_dashboard(widgets);
 }
@@ -1360,7 +1382,13 @@ static void on_clear_paper_slots_clicked(GtkButton *button, gpointer user_data) 
     );
 
     set_temporary_status_message(widgets, message);
-    show_action_dialog(widgets, message);
+    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
+        show_action_error_dialog(widgets, message);
+    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
+        show_action_warning_dialog(widgets, message);
+    } else {
+        show_action_info_dialog(widgets, message);
+    }
 
     refresh_dashboard(widgets);
 }
@@ -1379,7 +1407,7 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
 
     if (widgets->state->current_price <= 0.0) {
         set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
-    show_action_dialog(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
+    show_action_error_dialog(widgets, "Paper/SIM BEST_PROFIT bloccato: prezzo corrente non valido");
 
         db_log_engine_audit(
             "PAPER_SIM",
@@ -1405,7 +1433,7 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
 
     if (slot_count <= 0) {
         set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
-    show_action_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
+    show_action_warning_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot paper OPEN");
 
         db_log_engine_audit(
             "PAPER_SIM",
@@ -1479,7 +1507,7 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
 
     if (best_index < 0) {
         set_temporary_status_message(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
-    show_action_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
+    show_action_warning_dialog(widgets, "Paper/SIM BEST_PROFIT: nessuno slot selezionabile");
         return;
     }
 
@@ -1549,7 +1577,13 @@ static void on_run_paper_best_profit_clicked(GtkButton *button, gpointer user_da
     }
 
     set_temporary_status_message(widgets, message);
-    show_action_dialog(widgets, message);
+    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
+        show_action_error_dialog(widgets, message);
+    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
+        show_action_warning_dialog(widgets, message);
+    } else {
+        show_action_info_dialog(widgets, message);
+    }
 
     refresh_dashboard(widgets);
 }
@@ -1628,13 +1662,19 @@ static void on_save_email_clicked(GtkButton *button, gpointer user_data) {
 
     if (!email_settings_are_valid(&settings, message, sizeof(message))) {
         set_temporary_status_message(widgets, message);
-    show_action_dialog(widgets, message);
+    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
+        show_action_error_dialog(widgets, message);
+    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
+        show_action_warning_dialog(widgets, message);
+    } else {
+        show_action_info_dialog(widgets, message);
+    }
         return;
     }
 
     settings_save(&settings);
     set_temporary_status_message(widgets, "Preferenze email salvate");
-    show_action_dialog(widgets, "Preferenze email salvate");
+    show_action_info_dialog(widgets, "Preferenze email salvate");
 }
 
 static void on_test_email_clicked(GtkButton *button, gpointer user_data) {
@@ -1652,10 +1692,22 @@ static void on_test_email_clicked(GtkButton *button, gpointer user_data) {
 
     if (email_delivery_send_test(&settings, message, sizeof(message))) {
         set_temporary_status_message(widgets, message);
-    show_action_dialog(widgets, message);
+    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
+        show_action_error_dialog(widgets, message);
+    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
+        show_action_warning_dialog(widgets, message);
+    } else {
+        show_action_info_dialog(widgets, message);
+    }
     } else {
         set_temporary_status_message(widgets, message);
-    show_action_dialog(widgets, message);
+    if (strstr(message, "errore") != NULL || strstr(message, "Errore") != NULL || strstr(message, "fallito") != NULL || strstr(message, "NON chiuso") != NULL) {
+        show_action_error_dialog(widgets, message);
+    } else if (strstr(message, "bloccato") != NULL || strstr(message, "nessuno") != NULL || strstr(message, "non profittevole") != NULL) {
+        show_action_warning_dialog(widgets, message);
+    } else {
+        show_action_info_dialog(widgets, message);
+    }
     }
 }
 
@@ -1781,7 +1833,7 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
         settings.micro_live_max_order_eur > 50.0
     ) {
         set_temporary_status_message(widgets, "Errore: impostazioni non valide");
-    show_action_dialog(widgets, "Errore: impostazioni non valide");
+    show_action_error_dialog(widgets, "Errore: impostazioni non valide");
         return;
     }
 
@@ -1792,10 +1844,10 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
 
     if (settings.runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
         set_temporary_status_message(widgets, "LIVE_TRADING salvato ma bloccato dai safety checks");
-    show_action_dialog(widgets, "LIVE_TRADING salvato ma bloccato dai safety checks");
+    show_action_warning_dialog(widgets, "LIVE_TRADING salvato ma bloccato dai safety checks");
     } else {
         set_temporary_status_message(widgets, "Impostazioni salvate");
-    show_action_dialog(widgets, "Impostazioni salvate");
+    show_action_info_dialog(widgets, "Impostazioni salvate");
     }
 
     refresh_dashboard(widgets);
@@ -1806,8 +1858,15 @@ static void on_start_clicked(GtkButton *button, gpointer user_data) {
 
     AppWidgets *widgets = user_data;
 
+    if (widgets == NULL || widgets->state == NULL) {
+        return;
+    }
+
     widgets->state->running = true;
     db_save_state(widgets->state);
+
+    set_temporary_status_message(widgets, "Bot avviato");
+    show_action_info_dialog(widgets, "Bot avviato");
 
     refresh_dashboard(widgets);
 }
@@ -1817,9 +1876,16 @@ static void on_stop_clicked(GtkButton *button, gpointer user_data) {
 
     AppWidgets *widgets = user_data;
 
+    if (widgets == NULL || widgets->state == NULL) {
+        return;
+    }
+
     widgets->state->running = false;
     widgets->state->mode = BOT_MODE_PAUSED;
     db_save_state(widgets->state);
+
+    set_temporary_status_message(widgets, "Bot fermato");
+    show_action_warning_dialog(widgets, "Bot fermato");
 
     refresh_dashboard(widgets);
 }

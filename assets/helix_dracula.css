@@ -636,3 +636,29 @@ combobox popover row:selected * {
   font-size: 1.12em;
   line-height: 1.35;
 }
+
+/* Typed action dialogs */
+
+.helix-action-info {
+  border: 1px solid #6272a4;
+}
+
+.helix-action-warning {
+  border: 1px solid #ffb86c;
+}
+
+.helix-action-error {
+  border: 1px solid #ff5555;
+}
+
+.helix-action-info .helix-action-dialog-title {
+  color: #bd93f9;
+}
+
+.helix-action-warning .helix-action-dialog-title {
+  color: #ffb86c;
+}
+
+.helix-action-error .helix-action-dialog-title {
+  color: #ff5555;
+}
