@@ -22,6 +22,8 @@ echo "[4/4] make -f Makefile.live"
 make -f Makefile.live
 
 echo
+chmod +x helix helix-live
+
 echo "===================================="
 echo "BUILD COMPLETATA CON SUCCESSO"
 echo "===================================="
