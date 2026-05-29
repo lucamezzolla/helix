@@ -2994,7 +2994,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
         free_app_widgets
     );
 
-    widgets->timer_id = g_timeout_add_seconds(2, on_engine_timer, widgets);
+    widgets->timer_id = g_timeout_add_seconds(10, on_engine_timer, widgets);
 
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(page_scrolled_window), main_box);
     gtk_box_append(GTK_BOX(root_box), menu_bar);
