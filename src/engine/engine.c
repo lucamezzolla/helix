@@ -74,6 +74,7 @@ static int micro_live_accumulation_buy_should_run(
 );
 
 static int should_record_buy_exchange_safety_block(void);
+static int effective_used_slots_from_positions(const BotState *state);
 
 
 static int can_override_risk_guard_for_micro_buy(
@@ -145,7 +146,7 @@ static int can_override_risk_guard_for_micro_buy(
         return 0;
     }
 
-    if (state->used_slots >= settings->max_slots) {
+    if (effective_used_slots_from_positions(state) >= settings->max_slots) {
         return 0;
     }
 
@@ -228,7 +229,7 @@ static int micro_live_accumulation_buy_should_run(
         effective_max_slots = state->max_slots;
     }
 
-    if (effective_max_slots <= 0 || state->used_slots >= effective_max_slots) {
+    if (effective_max_slots <= 0 || effective_used_slots_from_positions(state) >= effective_max_slots) {
         return 0;
     }
 
@@ -260,6 +261,36 @@ static int should_record_buy_exchange_safety_block(void) {
     last_recorded_at = now;
     return 1;
 }
+
+static int get_open_position_slot_count(void) {
+    PositionSlotRecord slots[HELIX_MAX_OPEN_POSITION_SLOTS];
+
+    memset(slots, 0, sizeof(slots));
+
+    return db_get_open_position_slots(
+        slots,
+        HELIX_MAX_OPEN_POSITION_SLOTS
+    );
+}
+
+static int effective_used_slots_from_positions(const BotState *state) {
+    int open_slots = get_open_position_slot_count();
+
+    if (open_slots > 0) {
+        return open_slots;
+    }
+
+    if (state == NULL) {
+        return 0;
+    }
+
+    if (state->used_slots < 0) {
+        return 0;
+    }
+
+    return state->used_slots;
+}
+
 
 static int is_high_priority_audit_event(const char *event_type, const char *decision) {
     if (decision && (
@@ -831,7 +862,7 @@ static void record_buy_candidate_blocked_by_open_position(
         return;
     }
 
-    if (state->used_slots >= state->max_slots) {
+    if (effective_used_slots_from_positions(state) >= state->max_slots) {
         return;
     }
 
@@ -1341,7 +1372,11 @@ static void sync_state_from_remote_wallet(
     }
 
     if (state->btc_balance > 0.0) {
-        if (state->eur_balance < 1.0) {
+        int open_position_slots = get_open_position_slot_count();
+
+        if (open_position_slots > 0) {
+            state->used_slots = open_position_slots;
+        } else if (state->eur_balance < 1.0) {
             state->used_slots = state->max_slots;
         } else if (state->used_slots <= 0) {
             state->used_slots = 1;
