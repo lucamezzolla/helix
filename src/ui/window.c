@@ -136,6 +136,10 @@ static void load_app_css(void) {
         "  color: #cc8800;"
         "  font-weight: bold;"
         "}"
+        ".dashboard-label {"
+        "  font-size: 1.08em;"
+        "  line-height: 1.25;"
+        "}"
     );
 
     gtk_style_context_add_provider_for_display(
@@ -525,13 +529,19 @@ static void configure_dashboard_label(GtkWidget *label) {
         return;
     }
 
+    gtk_widget_add_css_class(label, "dashboard-label");
     gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_valign(label, GTK_ALIGN_START);
     gtk_widget_set_hexpand(label, TRUE);
+    gtk_widget_set_vexpand(label, FALSE);
+    gtk_widget_set_margin_bottom(label, 3);
 
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_yalign(GTK_LABEL(label), 0.0f);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
-    gtk_label_set_max_width_chars(GTK_LABEL(label), 90);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 110);
+    gtk_label_set_lines(GTK_LABEL(label), 0);
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_NONE);
 }
 
@@ -553,12 +563,10 @@ static GtkWidget *create_main_menu_bar(void) {
     g_object_unref(preferences_menu);
 
     GMenu *view_menu = g_menu_new();
-    g_menu_append(view_menu, "Storico operazioni", "win.show-trade-history");
-    g_menu_append(view_menu, "Audit decisioni", "win.show-engine-audit");
+    g_menu_append(view_menu, "Storico operazioni", "win.show-trades-table");
+    g_menu_append(view_menu, "Audit decisioni", "win.show-engine-audit-table");
     g_menu_append(view_menu, "Tabella slot reali", "win.show-position-slots-table");
-    g_menu_append(view_menu, "Tabella trades", "win.show-trades-table");
     g_menu_append(view_menu, "Tabella order journal", "win.show-order-journal-table");
-    g_menu_append(view_menu, "Tabella engine audit", "win.show-engine-audit-table");
     g_menu_append(view_menu, "Report pre-live", "win.show-prelive-report");
     g_menu_append(view_menu, "Stato protezioni", "win.show-safety-status");
     g_menu_append(view_menu, "Simula scenario dry-run", "win.show-dryrun-scenario");
@@ -2836,8 +2844,8 @@ static void on_menu_show_help_action(GSimpleAction *action, GVariant *parameter,
         widgets,
         "Guida Helix",
         "File: avvia, ferma o chiude Helix.\n\n"
-        "Preferenze: apre le impostazioni strategia e Coinbase API in finestre dedicate.\n\n"
-        "Visualizza: apre storico operazioni e audit decisioni in finestre dedicate.\n\n"
+        "Preferenze: apre impostazioni strategia, email report e Coinbase API in finestre dedicate.\n\n"
+        "Visualizza: apre storico operazioni, audit decisioni, slot reali e journal in viste tabellari.\n\n"
         "LIVE_TRADING resta bloccato dai safety gate e dal build normale."
     );
 }
