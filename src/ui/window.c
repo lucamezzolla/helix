@@ -138,8 +138,8 @@ static void load_app_css(void) {
         "  font-weight: bold;"
         "}"
         ".dashboard-label {"
-        "  font-size: 1.08em;"
-        "  line-height: 1.25;"
+        "  font-size: 1.14em;"
+        "  line-height: 1.30;"
         "}"
         ".line-online {"
         "  color: #008000;"
@@ -325,8 +325,8 @@ static void refresh_remote_wallet_status(AppWidgets *widgets) {
 }
 
 static void refresh_line_status_from_audit(AppWidgets *widgets) {
-    sqlite3 *db;
-    sqlite3_stmt *stmt;
+    sqlite3 *db = NULL;
+    sqlite3_stmt *stmt = NULL;
     const char *sql =
         "SELECT decision, reason "
         "FROM engine_audit "
@@ -345,6 +345,9 @@ static void refresh_line_status_from_audit(AppWidgets *widgets) {
     gtk_widget_remove_css_class(widgets->line_status_label, "line-offline");
 
     if (sqlite3_open("data/helix.db", &db) != SQLITE_OK) {
+        if (db != NULL) {
+            sqlite3_close(db);
+        }
         gtk_label_set_text(GTK_LABEL(widgets->line_status_label), "Linea/API: OFFLINE - database non leggibile");
         gtk_widget_add_css_class(widgets->line_status_label, "line-offline");
         return;

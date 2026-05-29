@@ -958,6 +958,145 @@ nessuna vendita wallet totale
 
 ---
 
+## Stato produzione controllata rc10
+
+Questa sezione descrive lo stato operativo più recente del ramo `real-sell-supervised`. È pensata come guida di orientamento rapida ma completa prima di qualunque run in produzione osservativa o test reale supervisionato.
+
+### Branch e tag principali
+
+- `live-candidate`: ramo stabile della produzione osservativa.
+- `real-sell-supervised`: ramo dedicato alla preparazione del primo SELL reale supervisionato.
+- `v0.3.0-rc6-daily-email-report`: report email giornaliero automatico.
+- `v0.3.0-rc7-line-status-indicator`: label `Linea/API` nella dashboard.
+- `v0.3.0-rc8-readable-daily-report`: report email con modalità motore leggibile.
+- `v0.3.0-rc9-real-sell-supervised-runbook`: runbook operativo per SELL reale supervisionato.
+- `v0.3.0-rc10-real-sell-one-shot-gate`: gate one-shot che consente al massimo un SELL reale nel test supervisionato.
+
+### Stato funzionale atteso
+
+Helix deve lavorare principalmente in `LIVE_READONLY` finché non viene deciso esplicitamente un test reale. In questa modalità deve:
+
+1. leggere wallet e prezzo BTC/EUR;
+2. sincronizzare lo stato del wallet con la posizione BTC;
+3. valutare gli slot reali aperti in `position_slots`;
+4. scegliere il miglior candidato SELL con logica `BEST_PROFIT`;
+5. bloccare BUY se il capitale operativo è esaurito;
+6. scrivere audit diagnostici in `engine_audit`;
+7. inviare report giornaliero se configurato;
+8. mostrare in UI lo stato linea/API;
+9. non inviare ordini reali.
+
+### Regola sugli slot
+
+Helix ragiona a slot sia in acquisto sia in vendita. Gli slot non rappresentano tutto il capitale disponibile, ma il capitale operativo, cioè il capitale totale meno la riserva protetta. Questo evita che il bot consumi tutta la liquidità disponibile durante una fase di accumulo.
+
+La vendita reale deve essere slot-based: Helix non deve vendere l’intero wallet BTC se non trova slot `OPEN` coerenti in `position_slots`. La scelta del candidato SELL deve essere fatta confrontando i singoli slot e selezionando il miglior profitto netto stimato.
+
+### Condizioni minime per valutare un SELL reale
+
+Un SELL reale supervisionato può essere considerato solo se tutte queste condizioni sono vere:
+
+- ramo `real-sell-supervised` aggiornato e pulito;
+- build live compilata con `Makefile.live`;
+- `HELIX_ALLOW_REAL_SLOT_SELL=true`;
+- runtime impostato a `LIVE_TRADING`;
+- `live_trading_armed=1`;
+- `micro_live_stop_after_real_order=1`;
+- `max_orders_per_day=1`;
+- nessun errore di linea/API recente;
+- preview Coinbase valida;
+- `SELL_SLOT_SELECTION = BEST_PROFIT_PROFITABLE_PREVIEW_ONLY`;
+- `REAL_SLOT_SELL_ONE_SHOT_GATE = ALLOWED_PRE_EXECUTION`;
+- nessun SELL reale già inviato oggi;
+- nessuno slot già chiuso oggi da SELL reale.
+
+Se una sola condizione manca, Helix deve restare in osservazione o bloccare il SELL.
+
+### Cosa significa one-shot gate
+
+Il one-shot gate è una protezione aggiuntiva per il primo test reale. Non decide se un prezzo è profittevole; quello lo decide prima la logica `BEST_PROFIT`. Il gate controlla invece che, una volta trovato uno slot profittevole, l’esecuzione reale sia autorizzata una sola volta e in condizioni controllate.
+
+Decisioni attese del gate:
+
+- `ALLOWED_PRE_EXECUTION`: il test reale sarebbe consentibile.
+- `BLOCKED_ENV_GATE`: variabile ambiente non abilitata.
+- `BLOCKED_NOT_LIVE_TRADING`: runtime diverso da `LIVE_TRADING`.
+- `BLOCKED_NOT_ARMED`: live trading non armato manualmente.
+- `BLOCKED_ALREADY_SENT_TODAY`: esiste già un SELL reale inviato oggi.
+- `BLOCKED_SLOT_ALREADY_CLOSED_TODAY`: uno slot risulta già chiuso oggi.
+- `BLOCKED_AUDIT_UNAVAILABLE`: impossibile leggere `order_journal`.
+- `BLOCKED_SLOT_AUDIT_UNAVAILABLE`: impossibile leggere `position_slots`.
+
+### Comando consigliato per controllo SELL
+
+```bash
+sqlite3 -header -column data/helix.db "
+SELECT created_at,event_type,decision,reason,eur_amount,estimated_fee,net_profit
+FROM engine_audit
+WHERE event_type IN (
+  'SELL_SLOT_SELECTION',
+  'REAL_SLOT_SELL_PLAN',
+  'REAL_SLOT_SELL_ONE_SHOT_GATE',
+  'EXCHANGE_SAFETY_SELL'
+)
+ORDER BY id DESC
+LIMIT 40;
+"
+```
+
+Il segnale da cercare non è semplicemente un prezzo BTC alto, ma una decisione audit coerente:
+
+```text
+SELL_SLOT_SELECTION = BEST_PROFIT_PROFITABLE_PREVIEW_ONLY
+REAL_SLOT_SELL_ONE_SHOT_GATE = ALLOWED_PRE_EXECUTION
+```
+
+### Checklist prima di avviare Helix in osservazione
+
+```bash
+git status
+git branch --show-current
+git log --oneline -5
+cat VERSION
+./build_all.sh
+./helix-live
+```
+
+In UI controllare:
+
+- `Modalità operativa: LIVE_READONLY` per osservazione;
+- `Linea/API: ONLINE`;
+- `Credenziali Coinbase: presenti`;
+- `Wallet Coinbase read-only: connesso`;
+- `Slot usati` coerente con `position_slots`;
+- email giornaliera configurata se serve monitoraggio.
+
+### File da non committare
+
+Non committare mai:
+
+- `.env`;
+- `.env.*`;
+- `data/helix.db`;
+- `helix`;
+- `helix-live`;
+- report temporanei `helix_*.txt`;
+- log locali;
+- zip di lavoro.
+
+### Pulizia prima di commit
+
+```bash
+rm -f helix helix-live
+rm -f helix_*.txt
+git status
+```
+
+### Note di sicurezza operative
+
+Il fatto che Helix trovi un prezzo migliore non basta per vendere. Il SELL reale deve passare dai gate. Per il primo test reale non si deve puntare a massimizzare il profitto, ma a verificare che tutto il ciclo sia corretto: preview, invio, order journal, reconciliation, chiusura slot e stop dopo ordine reale.
+
+
 ## Regola finale
 
 Helix può diventare produttivo solo quando ogni passaggio reale è:

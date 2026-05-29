@@ -28,6 +28,7 @@ static void build_uri(
 
 static void build_nonce(char *buffer, size_t buffer_size) {
     const char *hex = "0123456789abcdef";
+    static int random_seeded = 0;
 
     if (buffer_size < 33) {
         if (buffer_size > 0) {
@@ -37,7 +38,10 @@ static void build_nonce(char *buffer, size_t buffer_size) {
         return;
     }
 
-    srand((unsigned int)time(NULL));
+    if (!random_seeded) {
+        srand((unsigned int)time(NULL));
+        random_seeded = 1;
+    }
 
     for (int i = 0; i < 32; i++) {
         buffer[i] = hex[rand() % 16];

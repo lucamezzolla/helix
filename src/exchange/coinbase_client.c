@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 #define COINBASE_SPOT_URL \
@@ -44,6 +45,10 @@ static size_t write_callback(
 ) {
     size_t real_size = size * nmemb;
     HttpResponse *response = (HttpResponse *)userp;
+
+    if (response == NULL || real_size > SIZE_MAX - response->size - 1) {
+        return 0;
+    }
 
     char *ptr = realloc(
         response->memory,
