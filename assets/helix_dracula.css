@@ -1,10 +1,15 @@
 /*
- * Helix Dracula Theme - cleaned
- * Tema locale GTK4 per Helix.
+ * Helix Dracula Theme - cleaned contrast
+ * Local GTK4 CSS theme for Helix.
  */
 
+* {
+  color: #f8f8f2;
+}
+
 window,
-dialog {
+dialog,
+.background {
   background: #282a36;
   color: #f8f8f2;
 }
@@ -14,7 +19,9 @@ grid,
 scrolledwindow,
 viewport,
 stack,
-notebook {
+notebook,
+paned,
+frame {
   background: #282a36;
   color: #f8f8f2;
 }
@@ -24,21 +31,92 @@ label {
 }
 
 .dashboard-label {
-  font-size: 1.14em;
+  font-size: 1.16em;
   line-height: 1.35;
   color: #f8f8f2;
 }
 
 .section-title {
-  font-size: 1.16em;
+  font-size: 1.18em;
   font-weight: bold;
   color: #bd93f9;
 }
 
+/* Header / menu bar */
+headerbar,
+menubar,
+menubar > item,
+menubutton {
+  background: #21222c;
+  color: #f8f8f2;
+}
+
+menubar > item:hover,
+menubar > item:focus,
+menubutton:hover,
+menubutton:focus {
+  background: #44475a;
+  color: #f8f8f2;
+}
+
+/* GTK4 menu popovers/model buttons */
+popover,
+popover contents,
+popover box,
+popover.background,
+.popup,
+.menu,
+.context-menu {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+modelbutton,
+modelbutton label,
+popover modelbutton,
+popover modelbutton label,
+popover row,
+popover row label,
+menuitem,
+menuitem label {
+  background: transparent;
+  color: #f8f8f2;
+}
+
+modelbutton:hover,
+modelbutton:hover label,
+modelbutton:focus,
+modelbutton:focus label,
+popover modelbutton:hover,
+popover modelbutton:hover label,
+popover modelbutton:focus,
+popover modelbutton:focus label,
+popover row:hover,
+popover row:hover label,
+menuitem:hover,
+menuitem:hover label {
+  background: #44475a;
+  color: #f8f8f2;
+}
+
+modelbutton:active,
+modelbutton:checked,
+modelbutton:checked label,
+popover modelbutton:active,
+popover modelbutton:checked,
+popover modelbutton:checked label {
+  background: #6272a4;
+  color: #f8f8f2;
+}
+
+/* Inputs */
 entry,
 spinbutton,
 combobox,
-dropdown {
+dropdown,
+textview,
+text,
+textarea {
   background: #44475a;
   color: #f8f8f2;
   border: 1px solid #6272a4;
@@ -46,91 +124,103 @@ dropdown {
   padding: 5px 8px;
 }
 
+entry text,
+spinbutton text,
+textview text,
+text text {
+  background: #44475a;
+  color: #f8f8f2;
+}
+
 entry:focus,
-spinbutton:focus {
+spinbutton:focus,
+textview:focus {
   border-color: #bd93f9;
   color: #f8f8f2;
 }
 
-button {
+/* Buttons */
+button,
+button label {
   background: #44475a;
   color: #f8f8f2;
+  border-color: #6272a4;
+}
+
+button {
   border: 1px solid #6272a4;
   border-radius: 8px;
   padding: 7px 12px;
 }
 
-button:hover {
+button:hover,
+button:hover label,
+button:focus,
+button:focus label {
   background: #6272a4;
   color: #f8f8f2;
   border-color: #bd93f9;
 }
 
 button:active,
-button:checked {
+button:checked,
+button:active label,
+button:checked label {
   background: #bd93f9;
   color: #282a36;
   border-color: #bd93f9;
 }
 
-button:disabled {
+button:disabled,
+button:disabled label {
   background: #343746;
   color: #6272a4;
   border-color: #44475a;
 }
 
-menubutton,
-popover,
-popover contents,
-popover box,
-menu,
-menuitem {
-  background: #282a36;
-  color: #f8f8f2;
-}
-
-menuitem:hover,
-popover row:hover {
-  background: #44475a;
-  color: #f8f8f2;
-}
-
+/* Lists / tables */
 list,
 listview,
 columnview,
-treeview {
+treeview,
+row,
+list row,
+columnview row {
   background: #282a36;
   color: #f8f8f2;
 }
 
-row,
-list row {
-  background: #282a36;
+row label,
+list row label,
+columnview row label {
   color: #f8f8f2;
 }
 
 row:hover,
-list row:hover {
+row:hover label,
+list row:hover,
+list row:hover label,
+columnview row:hover,
+columnview row:hover label {
   background: #44475a;
   color: #f8f8f2;
 }
 
 row:selected,
-list row:selected {
+row:selected label,
+list row:selected,
+list row:selected label,
+columnview row:selected,
+columnview row:selected label {
   background: #6272a4;
   color: #f8f8f2;
 }
 
-columnview row:hover,
-columnview row:selected {
-  background: #44475a;
-  color: #f8f8f2;
-}
-
-headerbar {
+columnview header,
+columnview header button,
+columnview header button label {
   background: #21222c;
   color: #f8f8f2;
-  border-bottom: 1px solid #44475a;
 }
 
 separator {
@@ -146,51 +236,31 @@ scrollbar slider:hover {
   background: #bd93f9;
 }
 
-/* Stati Helix */
+selection {
+  background: #bd93f9;
+  color: #282a36;
+}
 
+/* Helix states */
 .credentials-ok,
 .line-online,
-.success-label {
+.success-label,
+.status-running {
   color: #50fa7b;
   font-weight: bold;
 }
 
 .credentials-missing,
-.warning-label {
-  color: #ffb86c;
-  font-weight: bold;
-}
-
-.line-offline,
-.error-label {
-  color: #ff5555;
-  font-weight: bold;
-}
-
-/*
- * Stato bot.
- * Se in futuro aggiungiamo classi dedicate da C:
- * - bot-running
- * - bot-paused
- * - bot-error
- */
-.bot-running {
-  color: #50fa7b;
-  font-weight: bold;
-}
-
+.warning-label,
+.status-stopped,
 .bot-paused {
   color: #ffb86c;
   font-weight: bold;
 }
 
+.line-offline,
+.error-label,
 .bot-error {
   color: #ff5555;
   font-weight: bold;
-}
-
-/* Testo selezionato */
-selection {
-  background: #bd93f9;
-  color: #282a36;
 }
