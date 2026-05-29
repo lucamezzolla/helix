@@ -594,17 +594,37 @@ static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *label = gtk_label_new(label_text);
 
-    gtk_widget_set_size_request(label, 170, -1);
+    gtk_widget_add_css_class(label, "setting-label");
+    gtk_widget_set_size_request(label, 180, -1);
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
-    gtk_label_set_max_width_chars(GTK_LABEL(label), 24);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 28);
     gtk_widget_set_hexpand(entry, TRUE);
+    gtk_widget_set_vexpand(entry, FALSE);
 
     gtk_box_append(GTK_BOX(row), label);
     gtk_box_append(GTK_BOX(row), entry);
 
     return row;
+}
+
+static void configure_button_box(GtkWidget *box) {
+    if (box == NULL) {
+        return;
+    }
+
+    gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(box, TRUE);
+}
+
+static void configure_action_button(GtkWidget *button) {
+    if (button == NULL) {
+        return;
+    }
+
+    gtk_widget_add_css_class(button, "form-action-button");
+    gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
 }
 
 static GtkWidget *create_section_title(const char *title) {
@@ -3224,10 +3244,15 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     runtime_mode_dropdown = gtk_drop_down_new_from_strings(runtime_modes);
 
     save_settings_button = gtk_button_new_with_label("Salva impostazioni");
+    configure_action_button(save_settings_button);
+    gtk_widget_add_css_class(save_settings_button, "primary-action");
 
     email_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     save_email_button = gtk_button_new_with_label("Salva preferenze email");
     test_email_button = gtk_button_new_with_label("Test consegna email");
+    configure_button_box(email_buttons_box);
+    configure_action_button(save_email_button);
+    configure_action_button(test_email_button);
     gtk_box_append(GTK_BOX(email_buttons_box), save_email_button);
     gtk_box_append(GTK_BOX(email_buttons_box), test_email_button);
 
@@ -3237,6 +3262,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     emergency_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     activate_emergency_stop_button = gtk_button_new_with_label("Attiva kill-switch");
     reset_emergency_stop_button = gtk_button_new_with_label("Reset kill-switch");
+    configure_button_box(emergency_buttons_box);
+    configure_action_button(activate_emergency_stop_button);
+    configure_action_button(reset_emergency_stop_button);
     gtk_box_append(GTK_BOX(emergency_buttons_box), activate_emergency_stop_button);
     gtk_box_append(GTK_BOX(emergency_buttons_box), reset_emergency_stop_button);
 
@@ -3247,6 +3275,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     arm_live_trading_button = gtk_button_new_with_label("Arma LIVE_TRADING");
     disarm_live_trading_button = gtk_button_new_with_label("Disarma LIVE_TRADING");
     acknowledge_real_order_button = gtk_button_new_with_label("Acknowledge ultimo ordine reale");
+    configure_button_box(live_trading_arm_buttons_box);
+    configure_action_button(arm_live_trading_button);
+    configure_action_button(disarm_live_trading_button);
+    configure_action_button(acknowledge_real_order_button);
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), arm_live_trading_button);
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), disarm_live_trading_button);
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), acknowledge_real_order_button);
@@ -3255,6 +3287,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     seed_paper_slots_button = gtk_button_new_with_label("Seed paper slots demo");
     clear_paper_slots_button = gtk_button_new_with_label("Clear paper slots");
     run_paper_best_profit_button = gtk_button_new_with_label("Run paper BEST_PROFIT");
+    configure_button_box(paper_slots_buttons_box);
+    configure_action_button(seed_paper_slots_button);
+    configure_action_button(clear_paper_slots_button);
+    configure_action_button(run_paper_best_profit_button);
     gtk_box_append(GTK_BOX(paper_slots_buttons_box), seed_paper_slots_button);
     gtk_box_append(GTK_BOX(paper_slots_buttons_box), clear_paper_slots_button);
     gtk_box_append(GTK_BOX(paper_slots_buttons_box), run_paper_best_profit_button);
@@ -3262,6 +3298,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     reserve_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     release_reserve_slot_button = gtk_button_new_with_label("Sblocca 1 slot riserva");
     lock_reserve_slot_button = gtk_button_new_with_label("Riblocca 1 slot riserva");
+    configure_button_box(reserve_buttons_box);
+    configure_action_button(release_reserve_slot_button);
+    configure_action_button(lock_reserve_slot_button);
     gtk_box_append(GTK_BOX(reserve_buttons_box), release_reserve_slot_button);
     gtk_box_append(GTK_BOX(reserve_buttons_box), lock_reserve_slot_button);
 

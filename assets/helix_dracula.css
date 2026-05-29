@@ -264,3 +264,56 @@ selection {
   color: #ff5555;
   font-weight: bold;
 }
+
+/* Helix compact form polish */
+
+.setting-label {
+  font-size: 1.06em;
+  color: #f8f8f2;
+}
+
+entry,
+spinbutton,
+combobox,
+dropdown {
+  min-height: 0;
+  padding: 3px 8px;
+}
+
+button {
+  min-height: 0;
+  padding: 5px 10px;
+}
+
+button label {
+  color: inherit;
+}
+
+button:hover label,
+button:checked label,
+button:active label {
+  color: inherit;
+}
+
+.form-action-button {
+  min-width: 140px;
+}
+
+.primary-action {
+  font-weight: bold;
+}
+
+.status-running {
+  color: #50fa7b;
+  font-weight: bold;
+}
+
+.status-stopped {
+  color: #ffb86c;
+  font-weight: bold;
+}
+
+.status-error {
+  color: #ff5555;
+  font-weight: bold;
+}
