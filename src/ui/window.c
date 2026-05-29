@@ -61,6 +61,7 @@ typedef struct {
     GtkWidget *remote_wallet_label;
     GtkWidget *last_trade_label;
     GtkWidget *settings_label;
+    GtkWidget *line_status_label;
     GtkWidget *status_label;
     GtkWidget *settings_expander;
     GtkWidget *email_expander;
@@ -139,6 +140,14 @@ static void load_app_css(void) {
         ".dashboard-label {"
         "  font-size: 1.08em;"
         "  line-height: 1.25;"
+        "}"
+        ".line-online {"
+        "  color: #008000;"
+        "  font-weight: bold;"
+        "}"
+        ".line-offline {"
+        "  color: #cc0000;"
+        "  font-weight: bold;"
         "}"
     );
 
@@ -313,6 +322,71 @@ static void refresh_remote_wallet_status(AppWidgets *widgets) {
     }
 
     gtk_label_set_text(GTK_LABEL(widgets->remote_wallet_label), text);
+}
+
+static void refresh_line_status_from_audit(AppWidgets *widgets) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    const char *sql =
+        "SELECT decision, reason "
+        "FROM engine_audit "
+        "WHERE event_type='LIVE_READONLY' "
+        "ORDER BY id DESC "
+        "LIMIT 1;";
+    const unsigned char *decision;
+    const unsigned char *reason;
+    char text[384];
+
+    if (widgets == NULL || widgets->line_status_label == NULL) {
+        return;
+    }
+
+    gtk_widget_remove_css_class(widgets->line_status_label, "line-online");
+    gtk_widget_remove_css_class(widgets->line_status_label, "line-offline");
+
+    if (sqlite3_open("data/helix.db", &db) != SQLITE_OK) {
+        gtk_label_set_text(GTK_LABEL(widgets->line_status_label), "Linea/API: OFFLINE - database non leggibile");
+        gtk_widget_add_css_class(widgets->line_status_label, "line-offline");
+        return;
+    }
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        gtk_label_set_text(GTK_LABEL(widgets->line_status_label), "Linea/API: OFFLINE - audit non leggibile");
+        gtk_widget_add_css_class(widgets->line_status_label, "line-offline");
+        return;
+    }
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        decision = sqlite3_column_text(stmt, 0);
+        reason = sqlite3_column_text(stmt, 1);
+
+        if (decision != NULL && strcmp((const char *)decision, "SYNC") == 0) {
+            snprintf(
+                text,
+                sizeof(text),
+                "Linea/API: ONLINE - %.260s",
+                reason ? (const char *)reason : "sync recente"
+            );
+            gtk_widget_add_css_class(widgets->line_status_label, "line-online");
+        } else {
+            snprintf(
+                text,
+                sizeof(text),
+                "Linea/API: OFFLINE - %.260s",
+                reason ? (const char *)reason : "ultimo controllo non riuscito"
+            );
+            gtk_widget_add_css_class(widgets->line_status_label, "line-offline");
+        }
+    } else {
+        snprintf(text, sizeof(text), "Linea/API: stato non ancora disponibile");
+        gtk_widget_add_css_class(widgets->line_status_label, "line-offline");
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    gtk_label_set_text(GTK_LABEL(widgets->line_status_label), text);
 }
 
 static void clear_trade_list(GtkWidget *trade_list) {
@@ -493,6 +567,7 @@ static void refresh_dashboard(AppWidgets *widgets) {
     refresh_status(widgets);
     refresh_coinbase_credentials_status(widgets);
     refresh_remote_wallet_status(widgets);
+    refresh_line_status_from_audit(widgets);
     refresh_trade_history(widgets);
     refresh_engine_audit(widgets);
 }
@@ -2924,6 +2999,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *remote_wallet_label;
     GtkWidget *last_trade_label;
     GtkWidget *settings_label;
+    GtkWidget *line_status_label;
     GtkWidget *status_label;
     GtkWidget *settings_expander;
     GtkWidget *settings_box;
@@ -3052,6 +3128,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     remote_wallet_label = gtk_label_new("");
     last_trade_label = gtk_label_new("");
     settings_label = gtk_label_new("");
+    line_status_label = gtk_label_new("Linea/API: stato non ancora verificato");
     status_label = gtk_label_new("");
 
     configure_dashboard_label(price_label);
@@ -3066,6 +3143,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     configure_dashboard_label(remote_wallet_label);
     configure_dashboard_label(last_trade_label);
     configure_dashboard_label(settings_label);
+    configure_dashboard_label(line_status_label);
     configure_dashboard_label(status_label);
 
     settings_expander = gtk_window_new();
@@ -3327,6 +3405,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(top_box), remote_wallet_label);
     gtk_box_append(GTK_BOX(top_box), last_trade_label);
     gtk_box_append(GTK_BOX(top_box), settings_label);
+    gtk_box_append(GTK_BOX(top_box), line_status_label);
     gtk_box_append(GTK_BOX(top_box), status_label);
 
     gtk_box_append(GTK_BOX(main_box), top_box);
@@ -3350,6 +3429,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->remote_wallet_label = remote_wallet_label;
     widgets->last_trade_label = last_trade_label;
     widgets->settings_label = settings_label;
+    widgets->line_status_label = line_status_label;
     widgets->status_label = status_label;
     widgets->settings_expander = settings_expander;
     widgets->email_expander = email_expander;
