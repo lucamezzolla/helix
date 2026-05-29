@@ -1,17 +1,6 @@
 /*
- * Helix Dracula Theme
- * Palette inspired by Dracula:
- * background  #282a36
- * current     #44475a
- * foreground  #f8f8f2
- * comment     #6272a4
- * cyan        #8be9fd
- * green       #50fa7b
- * orange      #ffb86c
- * pink        #ff79c6
- * purple      #bd93f9
- * red         #ff5555
- * yellow      #f1fa8c
+ * Helix Dracula Theme - cleaned
+ * Tema locale GTK4 per Helix.
  */
 
 window,
@@ -23,70 +12,14 @@ dialog {
 box,
 grid,
 scrolledwindow,
-viewport {
+viewport,
+stack,
+notebook {
   background: #282a36;
   color: #f8f8f2;
 }
 
 label {
-  color: #f8f8f2;
-}
-
-entry {
-  background: #44475a;
-  color: #f8f8f2;
-  border: 1px solid #6272a4;
-  border-radius: 6px;
-  padding: 5px 8px;
-}
-
-entry:focus {
-  border-color: #bd93f9;
-}
-
-button {
-  background: #44475a;
-  color: #f8f8f2;
-  border: 1px solid #6272a4;
-  border-radius: 8px;
-  padding: 7px 12px;
-}
-
-button:hover {
-  background: #6272a4;
-}
-
-button:active {
-  background: #bd93f9;
-  color: #282a36;
-}
-
-menubutton,
-popover,
-popover contents {
-  background: #282a36;
-  color: #f8f8f2;
-}
-
-list,
-listview,
-columnview,
-treeview {
-  background: #282a36;
-  color: #f8f8f2;
-}
-
-row {
-  background: #282a36;
-  color: #f8f8f2;
-}
-
-row:hover {
-  background: #44475a;
-}
-
-headerbar {
-  background: #21222c;
   color: #f8f8f2;
 }
 
@@ -102,37 +35,162 @@ headerbar {
   color: #bd93f9;
 }
 
-.credentials-ok {
+entry,
+spinbutton,
+combobox,
+dropdown {
+  background: #44475a;
+  color: #f8f8f2;
+  border: 1px solid #6272a4;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+entry:focus,
+spinbutton:focus {
+  border-color: #bd93f9;
+  color: #f8f8f2;
+}
+
+button {
+  background: #44475a;
+  color: #f8f8f2;
+  border: 1px solid #6272a4;
+  border-radius: 8px;
+  padding: 7px 12px;
+}
+
+button:hover {
+  background: #6272a4;
+  color: #f8f8f2;
+  border-color: #bd93f9;
+}
+
+button:active,
+button:checked {
+  background: #bd93f9;
+  color: #282a36;
+  border-color: #bd93f9;
+}
+
+button:disabled {
+  background: #343746;
+  color: #6272a4;
+  border-color: #44475a;
+}
+
+menubutton,
+popover,
+popover contents,
+popover box,
+menu,
+menuitem {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+menuitem:hover,
+popover row:hover {
+  background: #44475a;
+  color: #f8f8f2;
+}
+
+list,
+listview,
+columnview,
+treeview {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+row,
+list row {
+  background: #282a36;
+  color: #f8f8f2;
+}
+
+row:hover,
+list row:hover {
+  background: #44475a;
+  color: #f8f8f2;
+}
+
+row:selected,
+list row:selected {
+  background: #6272a4;
+  color: #f8f8f2;
+}
+
+columnview row:hover,
+columnview row:selected {
+  background: #44475a;
+  color: #f8f8f2;
+}
+
+headerbar {
+  background: #21222c;
+  color: #f8f8f2;
+  border-bottom: 1px solid #44475a;
+}
+
+separator {
+  background: #44475a;
+}
+
+scrollbar slider {
+  background: #6272a4;
+  border-radius: 8px;
+}
+
+scrollbar slider:hover {
+  background: #bd93f9;
+}
+
+/* Stati Helix */
+
+.credentials-ok,
+.line-online,
+.success-label {
   color: #50fa7b;
   font-weight: bold;
 }
 
-.credentials-missing {
-  color: #ffb86c;
-  font-weight: bold;
-}
-
-.line-online {
-  color: #50fa7b;
-  font-weight: bold;
-}
-
-.line-offline {
-  color: #ff5555;
-  font-weight: bold;
-}
-
+.credentials-missing,
 .warning-label {
   color: #ffb86c;
   font-weight: bold;
 }
 
+.line-offline,
 .error-label {
   color: #ff5555;
   font-weight: bold;
 }
 
-.success-label {
+/*
+ * Stato bot.
+ * Se in futuro aggiungiamo classi dedicate da C:
+ * - bot-running
+ * - bot-paused
+ * - bot-error
+ */
+.bot-running {
   color: #50fa7b;
   font-weight: bold;
+}
+
+.bot-paused {
+  color: #ffb86c;
+  font-weight: bold;
+}
+
+.bot-error {
+  color: #ff5555;
+  font-weight: bold;
+}
+
+/* Testo selezionato */
+selection {
+  background: #bd93f9;
+  color: #282a36;
 }
