@@ -1123,3 +1123,40 @@ Il file del tema si trova in:
 
 ```text
 assets/helix_dracula.css
+
+---
+
+## Test con prezzo di mercato simulato
+
+Helix può essere avviato in modalità osservativa con un prezzo BTC-EUR simulato per verificare la catena decisionale SELL senza aspettare che il mercato reale raggiunga la soglia desiderata.
+
+Questa modalità serve esclusivamente per test controllati di logica e audit. Non deve mai essere usata per trading reale.
+
+Configurazione locale in `.env`:
+
+```env
+HELIX_SIMULATED_MARKET_PRICE_ENABLED=1
+HELIX_SIMULATED_MARKET_PRICE_EUR=73000
+```
+
+Regole di sicurezza:
+
+- funziona solo in `SIMULATION` o `LIVE_READONLY`;
+- in `LIVE_TRADING` Helix blocca il ciclo e registra `MARKET_PRICE_SIMULATION / BLOCKED_LIVE_TRADING`;
+- le preview SELL slot-based diventano simulate e non chiamano Coinbase per il prezzo;
+- gli audit indicano chiaramente `SELL preview SIMULATA`;
+- il piano `REAL_SLOT_SELL_PLAN`, se prodotto, resta comunque non eseguito finché il wiring reale non viene implementato e finché tutti i gate non sono attivi.
+
+Prezzi utili per il test dello slot più vicino al profitto:
+
+```text
+66500  -> vicino al pareggio
+70000  -> profitto positivo da verificare contro le soglie
+73000  -> scenario atteso per SELL plan / one-shot gate
+```
+
+A fine test disattivare sempre:
+
+```env
+HELIX_SIMULATED_MARKET_PRICE_ENABLED=0
+```

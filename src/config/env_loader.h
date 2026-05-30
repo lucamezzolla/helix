@@ -19,4 +19,9 @@ int env_load_bool_flag(
     int fallback
 );
 
+double env_load_double_value(
+    const char *key,
+    double fallback
+);
+
 #endif

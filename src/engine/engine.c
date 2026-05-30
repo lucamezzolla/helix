@@ -40,6 +40,11 @@ static void audit_volatility_protection(VolatilityProtectionCheck check, BotStat
 
 static void audit_runtime_safety_block(const char *event_type, RuntimeSafetyCheck safety, BotState *state);
 static void make_live_client_order_id(char *buffer, size_t buffer_size, OrderExecutorSide side);
+static CoinbaseOrderPreview make_simulated_market_sell_preview(
+    double base_size_btc,
+    double price_eur,
+    StrategySettings *settings
+);
 static int execute_live_order_plan(
     const char *event_type,
     OrderExecutionPlan plan,
@@ -699,6 +704,59 @@ static void audit_runtime_safety_block(
 
 
 
+static CoinbaseOrderPreview make_simulated_market_sell_preview(
+    double base_size_btc,
+    double price_eur,
+    StrategySettings *settings
+) {
+    CoinbaseOrderPreview preview;
+    double gross;
+    double fee;
+
+    memset(&preview, 0, sizeof(preview));
+
+    preview.connected = 1;
+    preview.allowed = base_size_btc > 0.0 && price_eur > 0.0;
+    preview.http_code = 0;
+    preview.side = ORDER_PREVIEW_SIDE_SELL;
+    preview.base_size = base_size_btc;
+    preview.best_bid = price_eur;
+    preview.best_ask = price_eur;
+    preview.est_average_filled_price = price_eur;
+
+    gross = base_size_btc * price_eur;
+    fee = gross * estimate_fee_rate(settings);
+
+    if (gross < 0.0) {
+        gross = 0.0;
+    }
+    if (fee < 0.0) {
+        fee = 0.0;
+    }
+
+    preview.order_total = gross;
+    preview.quote_size = gross;
+    preview.commission_total = fee;
+    preview.slippage = 0.0;
+
+    snprintf(
+        preview.preview_id,
+        sizeof(preview.preview_id),
+        "%s",
+        "SIMULATED_MARKET_PRICE"
+    );
+
+    snprintf(
+        preview.message,
+        sizeof(preview.message),
+        "Preview SELL simulata | prezzo %.2f EUR | base %.8f",
+        price_eur,
+        base_size_btc
+    );
+
+    return preview;
+}
+
 static void make_live_client_order_id(
     char *buffer,
     size_t buffer_size,
@@ -1158,7 +1216,17 @@ static void audit_coinbase_order_preview_if_needed(
                     continue;
                 }
 
-                CoinbaseOrderPreview preview =
+                double simulated_sell_price = 0.0;
+                int use_simulated_sell_preview =
+                    settings->runtime_mode != RUNTIME_MODE_LIVE_TRADING &&
+                    market_data_simulated_price_override_active(&simulated_sell_price);
+
+                CoinbaseOrderPreview preview = use_simulated_sell_preview ?
+                    make_simulated_market_sell_preview(
+                        slot_base_size,
+                        simulated_sell_price,
+                        settings
+                    ) :
                     coinbase_order_preview_market_sell_btc("BTC-EUR", slot_base_size);
 
                 if (!preview.connected || !preview.allowed || preview.order_total <= 0.0) {
@@ -1209,7 +1277,9 @@ static void audit_coinbase_order_preview_if_needed(
                 snprintf(
                     sell_reason,
                     sizeof(sell_reason),
-                    "SELL preview slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%%",
+                    use_simulated_sell_preview ?
+                        "SELL preview SIMULATA slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%%" :
+                        "SELL preview slot #%d | base %.8f | gross %.2f | fee %.2f | net %.2f | cost %.2f | profit %.2f EUR %.2f%%",
                     slots[i].id,
                     slot_base_size,
                     sell_gross,
@@ -1351,7 +1421,17 @@ static void audit_coinbase_order_preview_if_needed(
                 settings->min_profit_percent
             );
 
-            CoinbaseOrderPreview preview =
+            double simulated_sell_price = 0.0;
+            int use_simulated_sell_preview =
+                settings->runtime_mode != RUNTIME_MODE_LIVE_TRADING &&
+                market_data_simulated_price_override_active(&simulated_sell_price);
+
+            CoinbaseOrderPreview preview = use_simulated_sell_preview ?
+                make_simulated_market_sell_preview(
+                    state->btc_balance,
+                    simulated_sell_price,
+                    settings
+                ) :
                 coinbase_order_preview_market_sell_btc("BTC-EUR", state->btc_balance);
 
             OrderExecutionPlan plan = order_executor_plan_market_sell_dry_run(
@@ -1751,6 +1831,59 @@ void helix_engine_tick(BotState *state) {
 
     state->max_slots = settings.max_slots;
     state->current_price = market_data_get_price(state);
+
+    double simulated_override_price = 0.0;
+    if (market_data_simulated_price_override_active(&simulated_override_price)) {
+        char simulation_reason[256];
+
+        if (settings.runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
+            state->mode = BOT_MODE_ERROR;
+            snprintf(
+                state->last_trade,
+                sizeof(state->last_trade),
+                "LIVE_TRADING bloccato: prezzo simulato attivo in .env"
+            );
+
+            audit_engine_decision(
+                "MARKET_PRICE_SIMULATION",
+                "BLOCKED_LIVE_TRADING",
+                "Prezzo simulato attivo: LIVE_TRADING bloccato per evitare trading reale con dati fittizi",
+                state->current_price,
+                state->btc_balance,
+                state->eur_balance,
+                0.0,
+                0.0
+            );
+
+            return;
+        }
+
+        snprintf(
+            simulation_reason,
+            sizeof(simulation_reason),
+            "Prezzo BTC-EUR simulato attivo: %.2f EUR | runtime %s | nessun ordine reale consentito",
+            simulated_override_price,
+            runtime_mode_to_string(settings.runtime_mode)
+        );
+
+        snprintf(
+            state->last_trade,
+            sizeof(state->last_trade),
+            "%.120s",
+            simulation_reason
+        );
+
+        audit_engine_decision(
+            "MARKET_PRICE_SIMULATION",
+            "ACTIVE",
+            simulation_reason,
+            state->current_price,
+            state->btc_balance,
+            state->eur_balance,
+            0.0,
+            0.0
+        );
+    }
 
     char recovery_reason[256];
 

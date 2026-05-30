@@ -289,3 +289,77 @@ int env_load_bool_flag(
 
     return fallback;
 }
+
+
+double env_load_double_value(
+    const char *target_key,
+    double fallback
+) {
+    FILE *file;
+    char line[4096];
+
+    if (target_key == NULL || target_key[0] == '\0') {
+        return fallback;
+    }
+
+    file = fopen(ENV_PATH, "r");
+
+    if (!file) {
+        return fallback;
+    }
+
+    while (fgets(line, sizeof(line), file)) {
+        char *equals;
+        char *key;
+        char *value;
+        char *endptr;
+        double parsed;
+
+        trim(line);
+
+        if (line[0] == '\0' || line[0] == '#') {
+            continue;
+        }
+
+        equals = strchr(line, '=');
+
+        if (!equals) {
+            continue;
+        }
+
+        *equals = '\0';
+
+        key = line;
+        value = equals + 1;
+
+        trim(key);
+        trim(value);
+        strip_optional_quotes(value);
+
+        if (strcmp(key, target_key) == 0) {
+            endptr = NULL;
+            parsed = strtod(value, &endptr);
+
+            if (endptr == value) {
+                fclose(file);
+                return fallback;
+            }
+
+            while (endptr != NULL && *endptr != '\0' && isspace((unsigned char)*endptr)) {
+                endptr++;
+            }
+
+            if (endptr != NULL && *endptr != '\0') {
+                fclose(file);
+                return fallback;
+            }
+
+            fclose(file);
+            return parsed;
+        }
+    }
+
+    fclose(file);
+
+    return fallback;
+}

@@ -407,3 +407,61 @@ BLOCKED_SLOT_AUDIT_UNAVAILABLE
 ```
 
 Per procedere verso un SELL reale supervisionato deve comparire `ALLOWED_PRE_EXECUTION` insieme a uno slot profittevole. Qualsiasi decisione `BLOCKED_*` impedisce il test reale.
+
+---
+
+## Test pre-SELL con prezzo simulato
+
+Prima di collegare o autorizzare un SELL reale, è possibile simulare un prezzo BTC-EUR alto per verificare come Helix reagisce quando uno slot diventa profittevole.
+
+Configurazione `.env` per test sicuro:
+
+```env
+HELIX_SIMULATED_MARKET_PRICE_ENABLED=1
+HELIX_SIMULATED_MARKET_PRICE_EUR=73000
+HELIX_ALLOW_REAL_SLOT_SELL=false
+HELIX_REAL_TRADING_ENABLED=false
+HELIX_ALLOW_COINBASE_ORDERS=false
+```
+
+Modalità richiesta dalla UI:
+
+```text
+LIVE_READONLY
+```
+
+Atteso nel DB:
+
+```text
+MARKET_PRICE_SIMULATION | ACTIVE
+EXCHANGE_SAFETY_SELL    | SELL_SLOT_PREVIEW_EVALUATED con reason "SELL preview SIMULATA"
+SELL_SLOT_SELECTION      | BEST_PROFIT_PROFITABLE_PREVIEW_ONLY, se le soglie sono superate
+REAL_SLOT_SELL_ONE_SHOT_GATE | ... se il percorso profittevole viene raggiunto
+REAL_SLOT_SELL_PLAN      | READY/BLOCKED, ma senza invio reale
+```
+
+Comando di controllo:
+
+```bash
+sqlite3 -header -column data/helix.db "
+SELECT created_at,event_type,decision,reason,eur_amount,estimated_fee,net_profit
+FROM engine_audit
+WHERE event_type IN (
+  'MARKET_PRICE_SIMULATION',
+  'EXCHANGE_SAFETY_SELL',
+  'SELL_SLOT_SELECTION',
+  'REAL_SLOT_SELL_ONE_SHOT_GATE',
+  'REAL_SLOT_SELL_PLAN'
+)
+ORDER BY id DESC
+LIMIT 80;
+"
+```
+
+A fine test:
+
+```env
+HELIX_SIMULATED_MARKET_PRICE_ENABLED=0
+```
+
+Non proseguire verso il SELL reale se nel DB resta un audit recente `MARKET_PRICE_SIMULATION / ACTIVE` o se `.env` contiene ancora il prezzo simulato attivo.
