@@ -1,5 +1,11 @@
 # Helix
 
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/lucamezzolla82)
+
+> If you find Helix useful or want to support its development, you can make a small donation through PayPal.  
+> Your support helps improve documentation, testing, safety checks, UI polish and controlled production-readiness.
+
+---
 Helix è un'applicazione desktop scritta in **C** con interfaccia **GTK4**. Il progetto nasce come motore prudente di trading su **BTC-EUR** collegato a Coinbase, sviluppato con una regola fondamentale: prima la sicurezza, poi l'automazione.
 
 Helix non è pensato per operare in modo aggressivo o autonomo senza controllo umano. L'obiettivo della versione attuale è arrivare a una **produzione controllata**, con micro-importi, uno slot alla volta, stop automatico dopo ogni ordine reale e riconciliazione obbligatoria.
@@ -1161,13 +1167,3 @@ A fine test disattivare sempre:
 HELIX_SIMULATED_MARKET_PRICE_ENABLED=0
 ```
 
----
-
-## Sostieni Helix
-
-Helix è un progetto personale sviluppato in C/GTK4 con l'obiettivo di costruire un motore di trading prudente, osservabile e controllabile.
-
-Se trovi utile il progetto o vuoi sostenerne lo sviluppo, puoi fare una donazione tramite PayPal:
-
-```text
-https://www.paypal.com/paypalme/lucamezzolla82
