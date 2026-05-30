@@ -1160,3 +1160,14 @@ A fine test disattivare sempre:
 ```env
 HELIX_SIMULATED_MARKET_PRICE_ENABLED=0
 ```
+
+---
+
+## Sostieni Helix
+
+Helix è un progetto personale sviluppato in C/GTK4 con l'obiettivo di costruire un motore di trading prudente, osservabile e controllabile.
+
+Se trovi utile il progetto o vuoi sostenerne lo sviluppo, puoi fare una donazione tramite PayPal:
+
+```text
+https://www.paypal.com/paypalme/lucamezzolla82
