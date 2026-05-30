@@ -6,47 +6,49 @@
 > Your support helps improve documentation, testing, safety checks, UI polish and controlled production-readiness.
 
 ---
-Helix è un'applicazione desktop scritta in **C** con interfaccia **GTK4**. Il progetto nasce come motore prudente di trading su **BTC-EUR** collegato a Coinbase, sviluppato con una regola fondamentale: prima la sicurezza, poi l'automazione.
 
-Helix non è pensato per operare in modo aggressivo o autonomo senza controllo umano. L'obiettivo della versione attuale è arrivare a una **produzione controllata**, con micro-importi, uno slot alla volta, stop automatico dopo ogni ordine reale e riconciliazione obbligatoria.
+Helix is a desktop application written in **C** with a **GTK4** interface. It is designed as a cautious BTC-EUR trading engine connected to Coinbase, built around one core principle: safety first, automation second.
 
-> ⚠️ Helix può interagire con denaro reale. Prima di qualunque test live bisogna verificare codice, database, configurazione `.env`, log, journal e stato Coinbase.
+Helix is not intended to trade aggressively or autonomously without human supervision. The current goal is **controlled production**: micro-sized operations, one slot at a time, automatic stop after every real order, mandatory reconciliation, and manual acknowledgement before continuing.
+
+> ⚠️ Helix can interact with real money. Before any live test, always verify the code, local database, `.env` configuration, logs, journal entries, Coinbase status, and current wallet balances.
 
 ---
 
-## Principi del progetto
+## Project principles
 
-Helix segue alcune regole rigide:
+Helix follows strict operating rules:
 
-- non compra mai usando tutto il saldo disponibile;
-- non vende mai l'intero wallet BTC;
-- compra e vende a **slot/lotti**;
-- ogni BUY reale deve aprire uno slot reale;
-- ogni SELL deve valutare solo slot aperti;
-- una SELL deve chiudere solo lo slot scelto, non il saldo globale;
-- la riserva EUR resta protetta;
-- ogni ordine reale deve essere tracciato in `order_journal`;
-- ogni ordine reale deve essere riconciliato dopo Coinbase;
-- dopo ogni ordine reale Helix deve fermarsi;
-- l'utente deve fare acknowledge manuale prima di procedere.
+- it never buys using the entire available balance;
+- it never sells the whole BTC wallet as a single undifferentiated position;
+- it buys and sells by **slots/lots**;
+- every real BUY must open a real slot;
+- every SELL must evaluate only open slots;
+- a SELL must close only the selected slot, not the global BTC balance;
+- the EUR reserve remains protected;
+- every real order must be tracked in `order_journal`;
+- every real order must be reconciled after Coinbase execution;
+- after every real order Helix must stop;
+- the user must manually acknowledge the last real order before proceeding.
 
-La regola d'oro è:
+The golden rule is:
 
 ```text
-Meglio non fare nulla che fare un ordine ambiguo.
+It is better to do nothing than to place an ambiguous order.
 ```
 
 ---
 
-## Stato attuale
+## Current status
 
-Branch principale di sviluppo controllato:
+Main controlled development branches:
 
-```bash
+```text
 live-candidate
+real-sell-supervised
 ```
 
-Ultime milestone rilevanti:
+Relevant milestones:
 
 ```text
 v0.2.2-paper-best-profit
@@ -58,81 +60,96 @@ v0.3.0-rc2-readonly-polling
 v0.3.0-rc3-operational-slot-buy-guard
 v0.3.0-rc4-production-readonly-candidate
 v0.3.0-rc5-email-settings-table-views
+v0.3.0-rc6-daily-email-report
+v0.3.0-rc7-line-status-indicator
+v0.3.0-rc8-readable-daily-report
+v0.3.0-rc9-real-sell-supervised-runbook
+v0.3.0-rc10-real-sell-one-shot-gate
+v0.3.0-rc12-simulated-price-override
 ```
 
-Stato tecnico attuale:
+Current technical status:
 
 ```text
-BUY reale micro validato                         ✅
-Post-order reconciliation BUY reale OK           ✅
-position_slots reale attiva                      ✅
-Primo slot reale OPEN                            ✅
-SELL preview per slot                            ✅
-BEST_PROFIT diagnostico su slot reali            ✅
-PAPER/SIM isolato                                ✅
-paper BEST_PROFIT funzionante                    ✅
-Acknowledge ultimo ordine reale                  ✅
-Gate HELIX_ALLOW_REAL_SLOT_SELL                  ✅
-Lookup slot reale per futura SELL reconciliation ✅
-SELL reconciliation con chiusura slot preparata  ✅
-Portfolio BUY guard operativo/riserva            ✅
-Polling readonly ridotto                         ✅
-Email report settings + test consegna            ✅
-Viste tabellari in Visualizza                    ✅
-SELL reale ancora disabilitata                   ✅
+Micro real BUY validated                              ✅
+Post-order reconciliation for real BUY OK             ✅
+Real position_slots active                            ✅
+First real OPEN slot                                  ✅
+Slot-based SELL preview                               ✅
+BEST_PROFIT diagnostics on real slots                 ✅
+Isolated PAPER/SIM mode                               ✅
+Paper BEST_PROFIT working                             ✅
+Manual acknowledgement for last real order            ✅
+HELIX_ALLOW_REAL_SLOT_SELL gate                       ✅
+Real slot lookup for future SELL reconciliation        ✅
+SELL reconciliation and slot close groundwork          ✅
+Operational portfolio BUY guard / reserve logic        ✅
+Reduced readonly polling                              ✅
+Email report settings and delivery test               ✅
+Daily email report                                    ✅
+Table views in the View menu                          ✅
+Line/API status indicator                             ✅
+Readable daily report mode names                      ✅
+Supervised real SELL runbook                          ✅
+One-shot real SELL gate                               ✅
+Simulated market price override for safe SELL testing  ✅
+Real SELL execution still disabled                    ✅
 ```
 
-Helix è quindi in stato **pre-produzione controllata**, non ancora in produzione autonoma.
+Helix is therefore in a **controlled pre-production** state. It is not an autonomous production trading bot.
 
 ---
 
-## Cosa Helix può fare ora
+## What Helix can do now
 
-Modalità attualmente considerate accettabili:
+Currently acceptable modes:
 
 ```text
 SIMULATION              ✅
 LIVE_READONLY           ✅
 PAPER/SIM               ✅
-Micro-live BUY vigilato ✅ / ⚠️
+Supervised micro-live BUY ✅ / ⚠️
 ```
 
-Funzionalità validate:
+Validated features:
 
-- leggere stato e impostazioni;
-- recuperare saldo/wallet in readonly;
-- fare preview Coinbase;
-- eseguire un micro BUY reale controllato;
-- riconciliare il BUY reale;
-- registrare il BUY reale come slot;
-- valutare SELL preview per slot;
-- scegliere lo slot migliore con BEST_PROFIT;
-- simulare BUY/SELL paper;
-- chiudere slot paper;
-- preparare il percorso di chiusura slot reale dopo futura SELL riconciliata.
+- read state and settings;
+- retrieve wallet status in readonly mode;
+- retrieve Coinbase BTC-EUR spot price;
+- perform Coinbase previews;
+- execute a controlled micro real BUY;
+- reconcile the real BUY;
+- register the real BUY as an OPEN position slot;
+- evaluate slot-based SELL previews;
+- choose the best candidate slot with BEST_PROFIT;
+- simulate paper BUY/SELL slot behavior;
+- close paper slots;
+- generate daily email reports;
+- display data through GTK table views;
+- test a simulated BTC-EUR price override without allowing real orders;
+- prepare the future real slot closing flow after a properly reconciled real SELL.
 
 ---
 
-## Cosa Helix NON deve ancora fare
+## What Helix must NOT do yet
 
-La versione attuale **non deve**:
+The current version must not:
 
 ```text
-eseguire SELL reale autonomamente       ❌
-vendere tutto il wallet BTC             ❌
-fare più ordini reali consecutivi       ❌
-operare 24/7 senza supervisione         ❌
-usare automaticamente la riserva EUR    ❌
-chiudere slot reali senza FILLED        ❌
+execute autonomous real SELL orders       ❌
+sell the whole BTC wallet                 ❌
+place multiple real orders in sequence    ❌
+run 24/7 without supervision              ❌
+automatically consume the EUR reserve     ❌
+close real slots without FILLED status    ❌
+trade using simulated market prices       ❌
 ```
 
-La SELL reale slot-based è ancora intenzionalmente bloccata.
+The slot-based real SELL path remains intentionally gated and supervised.
 
 ---
 
-## Struttura del progetto
-
-Struttura principale:
+## Project structure
 
 ```text
 helix/
@@ -141,14 +158,15 @@ helix/
 ├── build_all.sh
 ├── README.md
 ├── .env.example
+├── assets/
+│   └── helix_dracula.css
 ├── docs/
 │   ├── PRE_PROD_CHECKLIST.md
 │   ├── PRODUCTION_READONLY_RUNBOOK.md
+│   ├── REAL_SELL_SUPERVISED_RUNBOOK.md
 │   ├── LEGACY_IMPORT_NOTES.md
 │   ├── OVERNIGHT_LIVE_READONLY_RUN.md
-│   ├── RELEASE_v0.3.0-rc1.md
-│   ├── checklist_prelive.md
-│   └── release_notes_v0.2.0-prelive.md
+│   └── release notes / checklist files
 ├── src/
 │   ├── main.c
 │   ├── config/
@@ -161,12 +179,16 @@ helix/
 │   │   ├── engine.c
 │   │   ├── settings.c
 │   │   ├── settings.h
+│   │   ├── daily_report.c
+│   │   ├── daily_report.h
 │   │   ├── email_delivery.c
 │   │   ├── email_delivery.h
 │   │   ├── order_journal.c
 │   │   ├── order_journal.h
 │   │   ├── post_order_reconciliation.c
 │   │   ├── post_order_reconciliation.h
+│   │   ├── real_sell_supervision.c
+│   │   ├── real_sell_supervision.h
 │   │   ├── live_execution_lock.c
 │   │   ├── live_execution_lock.h
 │   │   ├── final_live_gate.c
@@ -190,7 +212,8 @@ helix/
 │   │   ├── order_executor.c
 │   │   └── order_executor.h
 │   ├── market/
-│   │   └── market_data.c
+│   │   ├── market_data.c
+│   │   └── market_data.h
 │   ├── ui/
 │   │   ├── window.c
 │   │   └── window.h
@@ -198,17 +221,16 @@ helix/
 │       ├── wallet_info.c
 │       └── wallet_info.h
 └── data/
-    └── helix.db       # locale, non committare
+    └── helix.db       # local only, never commit
 ```
 
 ---
 
+## Debian/Ubuntu package installation
 
-## Installazione pacchetti su Debian/Ubuntu
+This section prepares a Debian/Ubuntu machine to build and run Helix.
 
-Questa sezione prepara una macchina Debian/Ubuntu per compilare ed eseguire Helix.
-
-### Pacchetti minimi per build e runtime
+### Minimum build and runtime packages
 
 ```bash
 sudo apt update
@@ -227,143 +249,98 @@ sudo apt install -y \
   ca-certificates
 ```
 
-A cosa servono:
+Package purpose:
 
 ```text
-build-essential / make     -> compilatore C e strumenti di build
-pkg-config                 -> trova automaticamente flag GTK4 e librerie
-git                        -> gestione repository
-zip / unzip                 -> creare e aprire archivi sicuri del progetto
-sqlite3 / libsqlite3-dev    -> database locale Helix
-libgtk-4-dev                -> interfaccia grafica GTK4
-libcurl4-openssl-dev        -> chiamate HTTP verso Coinbase
-libcjson-dev                -> parsing JSON
-libjwt-dev                  -> gestione JWT/autenticazione Coinbase
-ca-certificates             -> certificati TLS/HTTPS
+build-essential / make     -> C compiler and build tools
+pkg-config                 -> resolves GTK4/library compiler flags
+git                        -> repository management
+zip / unzip                 -> create and inspect safe project archives
+sqlite3 / libsqlite3-dev    -> local Helix database
+libgtk-4-dev                -> GTK4 graphical interface
+libcurl4-openssl-dev        -> HTTP calls to Coinbase
+libcjson-dev                -> JSON parsing
+libjwt-dev                  -> JWT/Coinbase authentication
+ca-certificates             -> TLS/HTTPS certificates
 ```
 
-### Pacchetti per email report
+### Email report packages
 
-Per usare `Preferenze -> Email report` e il bottone `Test consegna email`, installare anche:
+To use `Preferences -> Email report` and the `Test email delivery` button:
 
 ```bash
 sudo apt install -y msmtp msmtp-mta
 ```
 
-`msmtp-mta` fornisce il comando compatibile:
-
-```bash
-sendmail
-```
-
-Helix usa di default:
+`msmtp-mta` provides a `sendmail`-compatible command. Helix uses by default:
 
 ```text
 sendmail -t
 ```
 
-La configurazione dettagliata della posta è descritta nella sezione **Configurazione email su Debian/Ubuntu**.
-
-### Pacchetti opzionali utili durante lo sviluppo
+### Optional development tools
 
 ```bash
 sudo apt install -y gdb valgrind
 ```
 
-Questi strumenti non sono necessari per l'uso normale, ma sono utili per diagnosi, debug e controlli di memoria.
+These tools are not required for normal use, but are useful for debugging and memory checks.
 
-### Verifica installazione
-
-Controllare GTK4:
+### Installation checks
 
 ```bash
 pkg-config --modversion gtk4
-```
-
-Controllare SQLite:
-
-```bash
 sqlite3 --version
-```
-
-Controllare il compilatore:
-
-```bash
 gcc --version
-```
-
-Controllare `sendmail` se si vuole usare l'email:
-
-```bash
 which sendmail
 ```
 
-### Primo build di verifica
+---
 
-Dalla root del progetto:
+## Build
+
+Normal build:
 
 ```bash
-cd ~/Documenti/C/helix
+make clean
+make
+```
+
+Live candidate build:
+
+```bash
+make -f Makefile.live clean
+make -f Makefile.live
+```
+
+Recommended full build:
+
+```bash
 ./build_all.sh
 ```
 
-Il build deve terminare senza errori. I binari generati sono:
+`build_all.sh` builds both local binaries:
 
 ```text
 helix
 helix-live
 ```
 
-Questi file sono locali e non devono essere committati.
+These binaries are local artifacts and must not be committed.
 
 ---
 
-## Build
+## Environment configuration
 
-Build normale:
-
-```bash
-make clean
-make
-```
-
-Build live candidate:
-
-```bash
-make -f Makefile.live clean
-make -f Makefile.live
-```
-
-Build completa consigliata:
-
-```bash
-./build_all.sh
-```
-
-`build_all.sh` esegue:
-
-```bash
-make clean
-make
-make -f Makefile.live clean
-make -f Makefile.live
-```
-
-I binari generati (`helix`, `helix-live`) non devono essere committati.
-
----
-
-## Configurazione ambiente
-
-Copiare l'esempio:
+Copy the example file:
 
 ```bash
 cp .env.example .env
 ```
 
-Il file `.env` è locale e non deve essere committato.
+The `.env` file is local and must never be committed.
 
-Gate globali per ordini reali:
+Global gates for real orders:
 
 ```env
 HELIX_REAL_TRADING_ENABLED=false
@@ -371,25 +348,36 @@ HELIX_ALLOW_COINBASE_ORDERS=false
 HELIX_I_UNDERSTAND_REAL_MONEY_RISK=false
 ```
 
-Gate dedicato per la futura SELL reale slot-based:
+Dedicated gate for future slot-based real SELL:
 
 ```env
 HELIX_ALLOW_REAL_SLOT_SELL=false
 ```
 
-Durante sviluppo, diagnostica, paper e live-readonly i gate devono restare `false`.
+During development, diagnostics, paper simulation and live-readonly runs, all real-order gates must remain `false`.
+
+### Coinbase credentials
+
+Coinbase credentials must be stored only in the local `.env` file:
+
+```env
+COINBASE_API_KEY=...
+COINBASE_API_SECRET=...
+```
+
+Never paste real private keys into issues, commits, README files, screenshots, logs, ZIP archives, or chat messages. If a private key is accidentally exposed, revoke it immediately and create a new one.
 
 ---
 
-## Gate dedicato per SELL reale slot-based
+## Dedicated gate for slot-based real SELL
 
-Helix introduce un gate ambiente separato:
+Helix has a separate environment gate:
 
 ```env
 HELIX_ALLOW_REAL_SLOT_SELL=false
 ```
 
-Questo gate è separato dai tre gate globali di real trading:
+This gate is intentionally separate from the global real-trading gates:
 
 ```env
 HELIX_REAL_TRADING_ENABLED=false
@@ -397,85 +385,56 @@ HELIX_ALLOW_COINBASE_ORDERS=false
 HELIX_I_UNDERSTAND_REAL_MONEY_RISK=false
 ```
 
-Motivo: BUY reale e SELL reale hanno rischi operativi diversi. Una futura abilitazione della BUY reale non deve rendere automaticamente disponibile anche la SELL reale.
+Reason: real BUY and real SELL have different operational risks. Enabling a future real BUY path must not automatically enable real SELL.
 
-Comportamento previsto:
+Expected behavior:
 
 ```text
 HELIX_ALLOW_REAL_SLOT_SELL=false
-    -> SELL reale slot-based bloccata dal gate ambiente
+    -> slot-based real SELL is blocked by the environment gate
 
 HELIX_ALLOW_REAL_SLOT_SELL=true
-    -> percorso SELL può diventare pronto, ma resta soggetto a tutti gli altri gate,
-       alla preview valida, alla reconciliation e allo stop automatico
+    -> the SELL path may become eligible, but it is still subject to all other gates,
+       valid preview, one-shot supervision, reconciliation, and automatic stop
 ```
 
-Audit attesi quando lo slot sarà profittevole ma la SELL reale resterà bloccata:
+Expected audit entries when a slot is profitable but real SELL remains blocked:
 
 ```text
 REAL_SLOT_SELL_PLAN
-REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE
-```
-
-Oppure, se il gate è true ma l'esecuzione resta non abilitata:
-
-```text
-REAL_SLOT_SELL_PLAN
-REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED
+BLOCKED_ENV_GATE
 ```
 
 ---
 
-## Configurazione email su Debian/Ubuntu
+## Email configuration on Debian/Ubuntu
 
-Helix può inviare una email di test e, nelle versioni successive, potrà usare la stessa configurazione per inviare report giornalieri.
+Helix can send a test email and a daily status report through a local `sendmail`-compatible command. The recommended approach is `msmtp`; this avoids storing SMTP passwords in the application database or source code.
 
-La scelta consigliata è usare un comando locale compatibile con `sendmail`, appoggiandosi a `msmtp`. In questo modo Helix non salva password SMTP nel database e non contiene credenziali nel codice.
-
-### Installazione pacchetti
-
-Su Debian/Ubuntu:
+### Install packages
 
 ```bash
 sudo apt update
 sudo apt install msmtp msmtp-mta ca-certificates
 ```
 
-`msmtp-mta` fornisce il comando:
+### Gmail configuration
 
-```bash
-sendmail
-```
+For Gmail, do not use the normal account password. Use a Google **App Password**.
 
-Helix usa normalmente questo comando:
+Indicative path:
 
 ```text
-sendmail -t
+Google Account -> Security -> 2-Step Verification -> App passwords
 ```
 
-### Configurazione Gmail
-
-Per Gmail non bisogna usare la password normale dell'account. Serve una **Password per app** generata dall'account Google.
-
-Percorso indicativo:
-
-```text
-Account Google -> Sicurezza -> Verifica in due passaggi -> Password per le app
-```
-
-Creare una password per app, per esempio con nome:
-
-```text
-Helix msmtp
-```
-
-Poi creare il file locale:
+Create a local file:
 
 ```bash
 nano ~/.msmtprc
 ```
 
-Esempio di configurazione:
+Example:
 
 ```text
 defaults
@@ -487,100 +446,93 @@ logfile        ~/.msmtp.log
 account gmail
 host smtp.gmail.com
 port 587
-from lucamezzolla@gmail.com
-user lucamezzolla@gmail.com
-password PASSWORD_PER_APP_GOOGLE
+from your-email@gmail.com
+user your-email@gmail.com
+password GOOGLE_APP_PASSWORD
 
 account default : gmail
 ```
 
-Proteggere il file:
+Protect it:
 
 ```bash
 chmod 600 ~/.msmtprc
 ```
 
-> ⚠️ Non committare mai `~/.msmtprc`, non copiarlo in `docs/`, non includerlo negli ZIP e non scrivere la password per app nel README, nel database o nel file `.env`.
+> ⚠️ Never commit `~/.msmtprc`, never copy it into `docs/`, never include it in ZIP files, and never write the app password in README, database, or `.env`.
 
-### Test manuale da terminale
-
-Prima di usare il bottone di Helix, testare l'invio da terminale:
+### Manual terminal test
 
 ```bash
-printf "To: lucamezzolla@gmail.com\nSubject: Helix test manuale msmtp\n\nTest manuale invio email da Helix via msmtp.\n" | sendmail -v -t
+printf "To: your-email@gmail.com\nSubject: Helix manual msmtp test\n\nManual email delivery test from Helix via msmtp.\n" | sendmail -v -t
 echo "exit_code=$?"
 ```
 
-Risultato atteso:
+Expected result:
 
 ```text
 exit_code=0
 ```
 
-In caso di errore:
+If it fails:
 
 ```bash
 tail -40 ~/.msmtp.log
 ```
 
-Errori tipici:
+Typical errors:
 
 ```text
 account default not found
 ```
 
-Significa che `~/.msmtprc` manca o non contiene `account default`.
+`~/.msmtprc` is missing or does not contain `account default`.
 
 ```text
 Application-specific password required
 ```
 
-Significa che è stata usata la password normale Gmail invece della password per app.
+A normal Gmail password was used instead of an app password.
 
-### Configurazione in Helix
+### Helix UI configuration
 
-Dalla UI:
-
-```text
-Preferenze -> Email report
-```
-
-Impostazioni consigliate:
+In the UI:
 
 ```text
-Email giornaliera attiva: 1
-Destinatario email: lucamezzolla@gmail.com
-Ora report email: 12
-Minuto report email: 0
-Comando invio email: sendmail -t
+Preferences -> Email report
 ```
 
-Poi premere:
+Suggested values:
 
 ```text
-Test consegna email
+Daily email enabled: 1
+Email recipient: your-email@gmail.com
+Email report hour: 12
+Email report minute: 0
+Email send command: sendmail -t
 ```
 
-Se il test funziona, il log `~/.msmtp.log` deve mostrare una riga con:
+Then press:
 
 ```text
-smtpstatus=250
-exitcode=EX_OK
+Test email delivery
 ```
+
+A successful test should show `smtpstatus=250` and `exitcode=EX_OK` in `~/.msmtp.log`.
 
 ---
 
-## Database SQLite
+## SQLite database
 
-Database locale:
+Local database:
 
 ```text
 data/helix.db
 ```
 
-Il database non deve essere committato.
+The database must not be committed.
 
-Tabelle principali:
+Main tables:
 
 ```text
 settings
@@ -595,9 +547,9 @@ paper_position_slots
 
 ### `position_slots`
 
-Contiene gli slot reali derivati da BUY reali Coinbase.
+Contains real slots created from real Coinbase BUY orders.
 
-Campi principali:
+Main fields:
 
 ```text
 id
@@ -615,79 +567,76 @@ sell_net_eur
 realized_profit_eur
 ```
 
-Stati principali:
+Main statuses:
 
 ```text
 OPEN
 CLOSED
 ```
 
-Uno slot reale può essere chiuso solo dopo futura SELL reale riconciliata correttamente.
+A real slot may be closed only after a future real SELL has been correctly reconciled.
 
 ### `paper_position_slots`
 
-Contiene slot fittizi usati solo per PAPER/SIM.
-
-Non deve mai essere mischiata con `position_slots` reale.
+Contains fake slots used only by PAPER/SIM. This table must never be mixed with real `position_slots`.
 
 ---
 
-## Flusso BUY reale micro
+## Real micro BUY flow
 
-Flusso validato:
+Validated flow:
 
 ```text
-1. BUY preview Coinbase
+1. Coinbase BUY preview
 2. exchange safety
 3. runtime safety
 4. final live gate
 5. live execution lock
-6. create-order Coinbase
+6. Coinbase create-order
 7. order_journal REAL_SENT
 8. post-order reconciliation
 9. POST_ORDER_RECON_OK
-10. creazione position_slots OPEN
+10. creation of OPEN position_slots
 11. STOP_AFTER_REAL_ORDER
-12. acknowledge manuale
+12. manual acknowledgement
 ```
 
-Il primo BUY reale micro è stato completato e riconciliato con successo.
+The first real micro BUY was completed and reconciled successfully.
 
 ---
 
-## Flusso SELL preview per slot
+## Slot-based SELL preview flow
 
-Helix non valuta più la vendita dell'intero wallet BTC.
-
-Flusso diagnostico attuale:
+Helix no longer evaluates selling the whole BTC wallet. The current diagnostic flow is:
 
 ```text
-1. legge position_slots OPEN
-2. per ogni slot calcola preview SELL Coinbase
-3. calcola gross, fee, net, cost, profit EUR, profit %
-4. sceglie lo slot migliore con BEST_PROFIT
-5. se lo slot non è profittevole blocca
-6. se lo slot è profittevole prepara audit/piano bloccato
-7. non invia SELL reale
+1. read OPEN position_slots
+2. calculate SELL preview for every slot
+3. calculate gross, fee, net, cost, EUR profit and profit percentage
+4. choose the best slot with BEST_PROFIT
+5. block if the best slot is not profitable
+6. if profitable, prepare a blocked/supervised real SELL plan
+7. do not send a real SELL order
 ```
 
-Decisioni tipiche:
+Typical decisions:
 
 ```text
 SELL_SLOT_PREVIEW_EVALUATED
 BEST_PROFIT_NOT_PROFITABLE
-SELL_SLOT_NOT_PROFITABLE
-REAL_SLOT_SELL_BLOCKED_BY_ENV_GATE
-REAL_SLOT_SELL_READY_BUT_NOT_EXECUTED
+BEST_PROFIT_PROFITABLE_PREVIEW_ONLY
+REAL_SLOT_SELL_ONE_SHOT_GATE
+REAL_SLOT_SELL_PLAN
+BLOCKED_ENV_GATE
 ```
 
 ---
 
 ## PAPER/SIM
 
-PAPER/SIM è isolato dalla parte reale.
+PAPER/SIM is isolated from the real trading path.
 
-Pulsanti UI:
+UI buttons:
 
 ```text
 Seed paper slots demo
@@ -695,7 +644,7 @@ Clear paper slots
 Run paper BEST_PROFIT
 ```
 
-`Seed paper slots demo` crea tre slot paper dimostrativi:
+`Seed paper slots demo` creates three demonstration paper slots:
 
 ```text
 paper-slot-a
@@ -706,79 +655,71 @@ paper-slot-c
 `Run paper BEST_PROFIT`:
 
 ```text
-valuta tutti gli slot paper OPEN
-calcola gross, fee, net, profit EUR, profit %
-sceglie lo slot migliore
-chiude lo slot paper se supera le soglie
-scrive audit PAPER_SIM
-```
-
-Test validato:
-
-```text
-paper-slot-c scelto come migliore
-paper-slot-c chiuso come CLOSED
-realized_profit_eur valorizzato
+evaluates all OPEN paper slots
+calculates gross, fee, net, EUR profit and profit percentage
+chooses the best slot
+closes the paper slot if thresholds are met
+writes PAPER_SIM audit entries
 ```
 
 ---
 
-## Reconciliation SELL e chiusura slot
+## SELL reconciliation and real slot close
 
-Il groundwork per la futura SELL reale riconciliata è stato preparato.
+Groundwork for future reconciled real SELL is prepared.
 
-Flusso desiderato per una futura SELL reale:
+Desired future flow:
 
 ```text
-1. SELL reale inviata solo su slot scelto
-2. Coinbase restituisce order_id
-3. order_journal registra REAL_SENT
-4. post_order_reconciliation legge stato ordine
-5. accetta solo FILLED / SETTLED / DONE / completion 100%
-6. legge wallet Coinbase
-7. trova slot OPEN compatibile con requested_base_size
-8. calcola sell_net_eur = preview_total_eur - preview_fee_eur
-9. calcola realized_profit_eur = sell_net_eur - cost_eur
-10. chiude position_slots con db_close_position_slot(...)
-11. scrive audit SLOT_CLOSE_RECONCILIATION
+1. real SELL is sent only for the selected slot
+2. Coinbase returns an order_id
+3. order_journal records REAL_SENT
+4. post_order_reconciliation reads the order status
+5. only FILLED / SETTLED / DONE / 100% completion is accepted
+6. Coinbase wallet is checked
+7. the matching OPEN slot is found
+8. sell_net_eur = preview_total_eur - preview_fee_eur
+9. realized_profit_eur = sell_net_eur - cost_eur
+10. db_close_position_slot(...) closes the slot
+11. SLOT_CLOSE_RECONCILIATION audit is written
 12. STOP_AFTER_REAL_ORDER
-13. acknowledge manuale
+13. manual acknowledgement
 ```
 
-Audit previsto:
+Expected audit:
 
 ```text
 SLOT_CLOSE_RECONCILIATION
 SLOT_CLOSED_AFTER_SELL_RECON
 ```
 
-Questa logica è preparatoria: la SELL reale resta ancora disabilitata finché non viene completato il percorso live controllato.
+This logic is preparatory. Real SELL remains gated until the controlled live path is completed.
 
 ---
 
-## Acknowledge ordine reale
+## Manual acknowledgement for real orders
 
-Dopo un ordine reale Helix richiede acknowledgement manuale.
+After a real order, Helix requires manual acknowledgement.
 
-Impostazione usata:
+Setting used:
 
 ```text
 micro_live.last_real_order_acknowledged
 ```
 
-La UI contiene il controllo:
+UI control:
 
 ```text
-Acknowledge ultimo ordine reale
+Acknowledge last real order
 ```
 
-L'acknowledge serve a impedire che Helix prosegua dopo un ordine reale senza revisione umana.
+Acknowledgement prevents Helix from continuing after a real order without human review.
 
 ---
 
-## Safety gates principali
+## Main safety gates
 
-Helix usa più livelli di blocco:
+Helix uses multiple layers of protection:
 
 ```text
 runtime_mode
@@ -798,70 +739,157 @@ HELIX_ENABLE_REAL_COINBASE_ORDERS
 final_live_gate
 live_execution_lock
 post_order_reconciliation
+real_sell_supervision one-shot gate
 ```
 
-Per micro-live controllato:
+For controlled micro-live:
 
 ```text
 max_orders_per_day = 1
 micro_live_stop_after_real_order = 1
 liquidity_reserve_percent >= 80
-micro_live_max_order_eur <= 10 consigliato
+micro_live_max_order_eur <= 10 recommended
 ```
 
 ---
 
-## Checklist pre-produzione
+## Controlled production rc10+ status
 
-Documento dedicato:
+The `real-sell-supervised` branch is dedicated to the first supervised real SELL test.
+
+### Branches and tags
+
+- `live-candidate`: stable observational-production candidate.
+- `real-sell-supervised`: branch for the supervised real SELL path.
+- `v0.3.0-rc6-daily-email-report`: automatic daily email report.
+- `v0.3.0-rc7-line-status-indicator`: `Line/API` dashboard indicator.
+- `v0.3.0-rc8-readable-daily-report`: readable engine mode in daily email.
+- `v0.3.0-rc9-real-sell-supervised-runbook`: operational runbook for supervised real SELL.
+- `v0.3.0-rc10-real-sell-one-shot-gate`: one-shot gate allowing at most one real SELL in the supervised test.
+- `v0.3.0-rc12-simulated-price-override`: simulated BTC-EUR price override for safe SELL-path testing.
+
+### Expected behavior in LIVE_READONLY
+
+In `LIVE_READONLY`, Helix should:
+
+1. read wallet and BTC-EUR price;
+2. synchronize wallet status with the BTC position;
+3. evaluate real OPEN slots in `position_slots`;
+4. choose the best SELL candidate with BEST_PROFIT;
+5. block BUY if operational capital is exhausted;
+6. write diagnostic audit entries in `engine_audit`;
+7. send daily email reports if configured;
+8. show Line/API status in the UI;
+9. never send real orders.
+
+### Slot rule
+
+Helix reasons in slots both when buying and when selling. Slots are based on operational capital, not the entire account value. Operational capital means total capital minus protected reserve. This prevents Helix from consuming all liquidity during accumulation.
+
+Real SELL must be slot-based: Helix must not sell the whole BTC wallet if it cannot find coherent OPEN slots in `position_slots`.
+
+### Minimum conditions for supervised real SELL consideration
+
+A supervised real SELL may be considered only if all of the following are true:
+
+- branch `real-sell-supervised` is clean and up to date;
+- live build compiled successfully;
+- `HELIX_SIMULATED_MARKET_PRICE_ENABLED=0`;
+- `HELIX_ALLOW_REAL_SLOT_SELL=true`;
+- runtime is `LIVE_TRADING`;
+- `live_trading_armed=1`;
+- `micro_live_stop_after_real_order=1`;
+- `max_orders_per_day=1`;
+- no recent Line/API error;
+- Coinbase preview is valid;
+- `SELL_SLOT_SELECTION = BEST_PROFIT_PROFITABLE_PREVIEW_ONLY`;
+- `REAL_SLOT_SELL_ONE_SHOT_GATE = ALLOWED_PRE_EXECUTION`;
+- no real SELL has already been sent today;
+- no slot has already been closed today by a real SELL.
+
+If one condition is missing, Helix must remain in observation mode or block the SELL.
+
+### One-shot gate
+
+The one-shot gate does not decide whether a price is profitable. Profitability is determined earlier by BEST_PROFIT. The gate checks whether a real SELL would be authorized once, under controlled conditions.
+
+Expected gate decisions:
 
 ```text
-docs/PRE_PROD_CHECKLIST.md
-```
-
-Prima di qualunque test reale:
-
-```text
-git status pulito
-build_all.sh senza warning
-backup data/helix.db
-.env verificato
-HELIX_ALLOW_REAL_SLOT_SELL=false
-STOP_AFTER_REAL_ORDER=1
-max_orders_per_day=1
-micro_live_max_order_eur <= 10
-liquidity_reserve_percent >= 80
-position_slots controllata
-order_journal controllato
-engine_audit controllato
+ALLOWED_PRE_EXECUTION
+BLOCKED_ENV_GATE
+BLOCKED_NOT_LIVE_TRADING
+BLOCKED_NOT_ARMED
+BLOCKED_ALREADY_SENT_TODAY
+BLOCKED_SLOT_ALREADY_CLOSED_TODAY
+BLOCKED_AUDIT_UNAVAILABLE
+BLOCKED_SLOT_AUDIT_UNAVAILABLE
 ```
 
 ---
 
-## Comandi utili
+## Simulated market price test
 
-Build completa:
+Helix can run in observational mode with a simulated BTC-EUR price to test the SELL decision chain without waiting for the real market to reach the target price.
+
+This mode is only for controlled logic and audit testing. It must never be used for real trading.
+
+Local `.env` configuration:
+
+```env
+HELIX_SIMULATED_MARKET_PRICE_ENABLED=1
+HELIX_SIMULATED_MARKET_PRICE_EUR=73000
+```
+
+Safety rules:
+
+- works only in `SIMULATION` or `LIVE_READONLY`;
+- in `LIVE_TRADING`, Helix blocks the cycle and records `MARKET_PRICE_SIMULATION / BLOCKED_LIVE_TRADING`;
+- slot-based SELL previews become simulated and do not rely on Coinbase for the simulated price;
+- audit entries clearly say `SELL preview SIMULATA`;
+- any `REAL_SLOT_SELL_PLAN` remains gated and not executed unless all real live gates are explicitly enabled in a future controlled test.
+
+Useful test prices for the closest slot:
+
+```text
+66500  -> near break-even
+70000  -> positive profit, thresholds to verify
+73000  -> expected SELL plan / one-shot gate scenario
+```
+
+Always disable this after testing:
+
+```env
+HELIX_SIMULATED_MARKET_PRICE_ENABLED=0
+HELIX_SIMULATED_MARKET_PRICE_EUR=0
+```
+
+---
+
+## Useful commands
+
+Full build:
 
 ```bash
 ./build_all.sh
 ```
 
-Stato Git:
+Git status:
 
 ```bash
 git status
 git log --oneline -8
-git tag --list "v0.2.*"
+git tag --list "v0.3.*"
 ```
 
-Backup DB:
+Database backup:
 
 ```bash
 mkdir -p data/backups
 cp data/helix.db "data/backups/helix_backup_$(date +%Y%m%d_%H%M%S).db"
 ```
 
-Controllo slot reali:
+Check real slots:
 
 ```bash
 sqlite3 -header -column data/helix.db "
@@ -873,7 +901,7 @@ ORDER BY id;
 "
 ```
 
-Controllo ultimi ordini:
+Check latest orders:
 
 ```bash
 sqlite3 -header -column data/helix.db "
@@ -886,154 +914,7 @@ LIMIT 20;
 "
 ```
 
-Controllo audit SELL:
-
-```bash
-sqlite3 -header -column data/helix.db "
-SELECT created_at,event_type,decision,reason,eur_amount,estimated_fee,net_profit
-FROM engine_audit
-WHERE event_type IN ('SELL_SLOT_SELECTION','REAL_SLOT_SELL_PLAN','EXCHANGE_SAFETY_SELL','SLOT_CLOSE_RECONCILIATION')
-ORDER BY id DESC
-LIMIT 30;
-"
-```
-
----
-
-## Creazione ZIP sicuro
-
-Non includere mai `.env`, `data/`, `.git/` o binari.
-
-Comando consigliato:
-
-```bash
-zip -r "../helix_state_$(date +%Y%m%d_%H%M%S).zip" . \
-  -x ".git/*" \
-  -x "data/*" \
-  -x ".env" \
-  -x "helix" \
-  -x "helix-live" \
-  -x "*.o" \
-  -x "*~"
-```
-
----
-
-## Roadmap verso produzione controllata
-
-### v0.2.5
-
-```text
-pre-produzione documentata
-SELL reale ancora disabilitata
-checklist pronta
-```
-
-### v0.3.0-rc1
-
-Obiettivo:
-
-```text
-SELL reale slot-based riconciliata in modo controllato
-```
-
-Requisiti minimi:
-
-```text
-SELL solo su slot OPEN
-Coinbase preview immediata valida
-HELIX_ALLOW_REAL_SLOT_SELL=true solo per test controllato
-ordine micro
-POST_ORDER_RECON_OK
-slot CLOSED solo dopo FILLED
-STOP_AFTER_REAL_ORDER
-acknowledge manuale
-```
-
-### v0.3.0
-
-Prima produzione controllata:
-
-```text
-un ordine reale alla volta
-micro importi
-supervisione umana
-nessun ciclo autonomo continuo
-nessuna vendita wallet totale
-```
-
----
-
-## Stato produzione controllata rc10
-
-Questa sezione descrive lo stato operativo più recente del ramo `real-sell-supervised`. È pensata come guida di orientamento rapida ma completa prima di qualunque run in produzione osservativa o test reale supervisionato.
-
-### Branch e tag principali
-
-- `live-candidate`: ramo stabile della produzione osservativa.
-- `real-sell-supervised`: ramo dedicato alla preparazione del primo SELL reale supervisionato.
-- `v0.3.0-rc6-daily-email-report`: report email giornaliero automatico.
-- `v0.3.0-rc7-line-status-indicator`: label `Linea/API` nella dashboard.
-- `v0.3.0-rc8-readable-daily-report`: report email con modalità motore leggibile.
-- `v0.3.0-rc9-real-sell-supervised-runbook`: runbook operativo per SELL reale supervisionato.
-- `v0.3.0-rc10-real-sell-one-shot-gate`: gate one-shot che consente al massimo un SELL reale nel test supervisionato.
-
-### Stato funzionale atteso
-
-Helix deve lavorare principalmente in `LIVE_READONLY` finché non viene deciso esplicitamente un test reale. In questa modalità deve:
-
-1. leggere wallet e prezzo BTC/EUR;
-2. sincronizzare lo stato del wallet con la posizione BTC;
-3. valutare gli slot reali aperti in `position_slots`;
-4. scegliere il miglior candidato SELL con logica `BEST_PROFIT`;
-5. bloccare BUY se il capitale operativo è esaurito;
-6. scrivere audit diagnostici in `engine_audit`;
-7. inviare report giornaliero se configurato;
-8. mostrare in UI lo stato linea/API;
-9. non inviare ordini reali.
-
-### Regola sugli slot
-
-Helix ragiona a slot sia in acquisto sia in vendita. Gli slot non rappresentano tutto il capitale disponibile, ma il capitale operativo, cioè il capitale totale meno la riserva protetta. Questo evita che il bot consumi tutta la liquidità disponibile durante una fase di accumulo.
-
-La vendita reale deve essere slot-based: Helix non deve vendere l’intero wallet BTC se non trova slot `OPEN` coerenti in `position_slots`. La scelta del candidato SELL deve essere fatta confrontando i singoli slot e selezionando il miglior profitto netto stimato.
-
-### Condizioni minime per valutare un SELL reale
-
-Un SELL reale supervisionato può essere considerato solo se tutte queste condizioni sono vere:
-
-- ramo `real-sell-supervised` aggiornato e pulito;
-- build live compilata con `Makefile.live`;
-- `HELIX_ALLOW_REAL_SLOT_SELL=true`;
-- runtime impostato a `LIVE_TRADING`;
-- `live_trading_armed=1`;
-- `micro_live_stop_after_real_order=1`;
-- `max_orders_per_day=1`;
-- nessun errore di linea/API recente;
-- preview Coinbase valida;
-- `SELL_SLOT_SELECTION = BEST_PROFIT_PROFITABLE_PREVIEW_ONLY`;
-- `REAL_SLOT_SELL_ONE_SHOT_GATE = ALLOWED_PRE_EXECUTION`;
-- nessun SELL reale già inviato oggi;
-- nessuno slot già chiuso oggi da SELL reale.
-
-Se una sola condizione manca, Helix deve restare in osservazione o bloccare il SELL.
-
-### Cosa significa one-shot gate
-
-Il one-shot gate è una protezione aggiuntiva per il primo test reale. Non decide se un prezzo è profittevole; quello lo decide prima la logica `BEST_PROFIT`. Il gate controlla invece che, una volta trovato uno slot profittevole, l’esecuzione reale sia autorizzata una sola volta e in condizioni controllate.
-
-Decisioni attese del gate:
-
-- `ALLOWED_PRE_EXECUTION`: il test reale sarebbe consentibile.
-- `BLOCKED_ENV_GATE`: variabile ambiente non abilitata.
-- `BLOCKED_NOT_LIVE_TRADING`: runtime diverso da `LIVE_TRADING`.
-- `BLOCKED_NOT_ARMED`: live trading non armato manualmente.
-- `BLOCKED_ALREADY_SENT_TODAY`: esiste già un SELL reale inviato oggi.
-- `BLOCKED_SLOT_ALREADY_CLOSED_TODAY`: uno slot risulta già chiuso oggi.
-- `BLOCKED_AUDIT_UNAVAILABLE`: impossibile leggere `order_journal`.
-- `BLOCKED_SLOT_AUDIT_UNAVAILABLE`: impossibile leggere `position_slots`.
-
-### Comando consigliato per controllo SELL
+Check SELL audit:
 
 ```bash
 sqlite3 -header -column data/helix.db "
@@ -1043,127 +924,105 @@ WHERE event_type IN (
   'SELL_SLOT_SELECTION',
   'REAL_SLOT_SELL_PLAN',
   'REAL_SLOT_SELL_ONE_SHOT_GATE',
-  'EXCHANGE_SAFETY_SELL'
+  'EXCHANGE_SAFETY_SELL',
+  'SLOT_CLOSE_RECONCILIATION'
 )
 ORDER BY id DESC
 LIMIT 40;
 "
 ```
 
-Il segnale da cercare non è semplicemente un prezzo BTC alto, ma una decisione audit coerente:
-
-```text
-SELL_SLOT_SELECTION = BEST_PROFIT_PROFITABLE_PREVIEW_ONLY
-REAL_SLOT_SELL_ONE_SHOT_GATE = ALLOWED_PRE_EXECUTION
-```
-
-### Checklist prima di avviare Helix in osservazione
+Check simulated price audit:
 
 ```bash
-git status
-git branch --show-current
-git log --oneline -5
-cat VERSION
-./build_all.sh
-./helix-live
+sqlite3 -header -column data/helix.db "
+SELECT created_at,event_type,decision,reason
+FROM engine_audit
+WHERE event_type='MARKET_PRICE_SIMULATION'
+ORDER BY id DESC
+LIMIT 10;
+"
 ```
-
-In UI controllare:
-
-- `Modalità operativa: LIVE_READONLY` per osservazione;
-- `Linea/API: ONLINE`;
-- `Credenziali Coinbase: presenti`;
-- `Wallet Coinbase read-only: connesso`;
-- `Slot usati` coerente con `position_slots`;
-- email giornaliera configurata se serve monitoraggio.
-
-### File da non committare
-
-Non committare mai:
-
-- `.env`;
-- `.env.*`;
-- `data/helix.db`;
-- `helix`;
-- `helix-live`;
-- report temporanei `helix_*.txt`;
-- log locali;
-- zip di lavoro.
-
-### Pulizia prima di commit
-
-```bash
-rm -f helix helix-live
-rm -f helix_*.txt
-git status
-```
-
-### Note di sicurezza operative
-
-Il fatto che Helix trovi un prezzo migliore non basta per vendere. Il SELL reale deve passare dai gate. Per il primo test reale non si deve puntare a massimizzare il profitto, ma a verificare che tutto il ciclo sia corretto: preview, invio, order journal, reconciliation, chiusura slot e stop dopo ordine reale.
-
-
-## Regola finale
-
-Helix può diventare produttivo solo quando ogni passaggio reale è:
-
-```text
-esplicito
-piccolo
-tracciato
-riconciliato
-reversibile operativamente
-fermato dopo esecuzione
-confermato manualmente dall'utente
-```
-
-Fino ad allora, Helix resta una release tecnica/pre-prod controllata.
 
 ---
 
-## Tema grafico Dracula
+## Safe ZIP creation
 
-Helix include un tema GTK4 ispirato alla palette Dracula.
+Never include `.env`, `data/`, `.git/`, binaries, logs, or temporary reports.
 
-Il file del tema si trova in:
+Recommended command:
+
+```bash
+zip -r "../helix_state_$(date +%Y%m%d_%H%M%S).zip" . \
+  -x ".git/*" \
+  -x "data/*" \
+  -x ".env" \
+  -x ".env.*" \
+  -x "helix" \
+  -x "helix-live" \
+  -x "*.o" \
+  -x "*.log" \
+  -x "*.txt" \
+  -x "*~" \
+  -x "*.zip"
+```
+
+---
+
+## Dracula GTK4 theme
+
+Helix includes a local GTK4 Dracula-inspired theme.
+
+Theme file:
 
 ```text
 assets/helix_dracula.css
+```
+
+The theme customizes:
+
+- main window background;
+- dashboard labels;
+- Line/API online/offline colors;
+- buttons;
+- input fields;
+- dropdowns;
+- tables and lists;
+- warning/error/success labels;
+- action notification dialogs.
+
+The theme is local to the project and does not require installing a system-wide GTK theme.
 
 ---
 
-## Test con prezzo di mercato simulato
+## Funding
 
-Helix può essere avviato in modalità osservativa con un prezzo BTC-EUR simulato per verificare la catena decisionale SELL senza aspettare che il mercato reale raggiunga la soglia desiderata.
+Helix is a personal project developed in C/GTK4 with the goal of building a cautious, observable and controlled trading engine.
 
-Questa modalità serve esclusivamente per test controllati di logica e audit. Non deve mai essere usata per trading reale.
-
-Configurazione locale in `.env`:
-
-```env
-HELIX_SIMULATED_MARKET_PRICE_ENABLED=1
-HELIX_SIMULATED_MARKET_PRICE_EUR=73000
-```
-
-Regole di sicurezza:
-
-- funziona solo in `SIMULATION` o `LIVE_READONLY`;
-- in `LIVE_TRADING` Helix blocca il ciclo e registra `MARKET_PRICE_SIMULATION / BLOCKED_LIVE_TRADING`;
-- le preview SELL slot-based diventano simulate e non chiamano Coinbase per il prezzo;
-- gli audit indicano chiaramente `SELL preview SIMULATA`;
-- il piano `REAL_SLOT_SELL_PLAN`, se prodotto, resta comunque non eseguito finché il wiring reale non viene implementato e finché tutti i gate non sono attivi.
-
-Prezzi utili per il test dello slot più vicino al profitto:
+If you find the project useful or want to support its development, you can donate through PayPal:
 
 ```text
-66500  -> vicino al pareggio
-70000  -> profitto positivo da verificare contro le soglie
-73000  -> scenario atteso per SELL plan / one-shot gate
+https://www.paypal.com/paypalme/lucamezzolla82
 ```
 
-A fine test disattivare sempre:
+Your support helps maintain the project, improve documentation, add tests, strengthen safety checks, improve the UI and continue the controlled production-readiness work.
 
-```env
-HELIX_SIMULATED_MARKET_PRICE_ENABLED=0
+Thank you for every contribution.
+
+---
+
+## Final rule
+
+Helix can become productive only when every real step is:
+
+```text
+explicit
+small
+tracked
+reconciled
+operationally reversible
+stopped after execution
+manually acknowledged by the user
 ```
 
+Until then, Helix remains a controlled technical pre-production release.
