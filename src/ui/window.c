@@ -13,6 +13,7 @@
 #include "../exchange/coinbase_client.h"
 #include "../wallet/wallet_info.h"
 #include "../config/env_loader.h"
+#include "../i18n/ui_language.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,49 @@
 
 #define TRADE_HISTORY_LIMIT 8
 #define ENGINE_AUDIT_LIMIT 8
+
+
+#define HELIX_UI_LANGUAGE_SETTING_KEY "ui.language"
+
+static HelixLanguage current_ui_language(void) {
+    char buffer[16];
+
+    if (db_get_setting(HELIX_UI_LANGUAGE_SETTING_KEY, buffer, sizeof(buffer))) {
+        return helix_language_from_code(buffer);
+    }
+
+    return HELIX_LANG_IT;
+}
+
+static const char *tr_key(const char *key) {
+    return helix_tr(current_ui_language(), key);
+}
+
+static void save_ui_language(HelixLanguage language) {
+    db_set_setting(HELIX_UI_LANGUAGE_SETTING_KEY, helix_language_code(language));
+}
+
+static guint language_to_dropdown_index(HelixLanguage language) {
+    switch (language) {
+        case HELIX_LANG_EN: return 1;
+        case HELIX_LANG_ES: return 2;
+        case HELIX_LANG_PT: return 3;
+        case HELIX_LANG_FR: return 4;
+        case HELIX_LANG_IT:
+        default: return 0;
+    }
+}
+
+static HelixLanguage dropdown_index_to_language(guint index) {
+    switch (index) {
+        case 1: return HELIX_LANG_EN;
+        case 2: return HELIX_LANG_ES;
+        case 3: return HELIX_LANG_PT;
+        case 4: return HELIX_LANG_FR;
+        case 0:
+        default: return HELIX_LANG_IT;
+    }
+}
 
 static double parse_decimal_input(const char *value) {
     char buffer[64];
@@ -45,6 +89,8 @@ static double parse_decimal_input(const char *value) {
 typedef struct {
     BotState *state;
     GtkWidget *window;
+    GtkWidget *root_box;
+    GtkWidget *menu_bar;
     guint timer_id;
     guint status_message_timeout_id;
     gboolean has_temporary_status_message;
@@ -66,6 +112,7 @@ typedef struct {
     GtkWidget *settings_expander;
     GtkWidget *email_expander;
     GtkWidget *coinbase_expander;
+    GtkWidget *language_window;
     GtkWidget *history_title;
     GtkWidget *history_scrolled_window;
     GtkWidget *audit_title;
@@ -99,11 +146,16 @@ typedef struct {
     GtkWidget *email_report_hour_entry;
     GtkWidget *email_report_minute_entry;
     GtkWidget *email_sendmail_command_entry;
+    GtkWidget *save_settings_button;
     GtkWidget *save_email_button;
     GtkWidget *test_email_button;
     GtkWidget *emergency_stop_label;
+    GtkWidget *activate_emergency_stop_button;
+    GtkWidget *reset_emergency_stop_button;
     GtkWidget *live_trading_arm_label;
     GtkWidget *live_trading_arm_buttons_box;
+    GtkWidget *release_reserve_slot_button;
+    GtkWidget *lock_reserve_slot_button;
     GtkWidget *arm_live_trading_button;
     GtkWidget *disarm_live_trading_button;
     GtkWidget *acknowledge_real_order_button;
@@ -111,10 +163,14 @@ typedef struct {
     GtkWidget *clear_paper_slots_button;
     GtkWidget *run_paper_best_profit_button;
     GtkWidget *runtime_mode_dropdown;
+    GtkWidget *language_dropdown;
 
     GtkWidget *coinbase_api_key_entry;
     GtkWidget *coinbase_api_secret_entry;
+    GtkWidget *save_coinbase_button;
 } AppWidgets;
+
+static GtkWidget *create_i18n_button(const char *label_key);
 
 static void load_app_css(void) {
     GtkCssProvider *provider = gtk_css_provider_new();
@@ -330,7 +386,7 @@ static void show_action_dialog_typed(AppWidgets *widgets, const char *title_text
     gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
     gtk_widget_set_halign(label, GTK_ALIGN_FILL);
 
-    button = gtk_button_new_with_label("OK");
+    button = create_i18n_button("dialog.ok");
     gtk_widget_add_css_class(button, "dialog-action-button");
     gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
 
@@ -345,15 +401,15 @@ static void show_action_dialog_typed(AppWidgets *widgets, const char *title_text
 }
 
 static void show_action_info_dialog(AppWidgets *widgets, const char *message) {
-    show_action_dialog_typed(widgets, "Operazione completata", message, "helix-action-info");
+    show_action_dialog_typed(widgets, tr_key("dialog.info"), message, "helix-action-info");
 }
 
 static void show_action_warning_dialog(AppWidgets *widgets, const char *message) {
-    show_action_dialog_typed(widgets, "Attenzione", message, "helix-action-warning");
+    show_action_dialog_typed(widgets, tr_key("dialog.warning"), message, "helix-action-warning");
 }
 
 static void show_action_error_dialog(AppWidgets *widgets, const char *message) {
-    show_action_dialog_typed(widgets, "Errore", message, "helix-action-error");
+    show_action_dialog_typed(widgets, tr_key("dialog.error"), message, "helix-action-error");
 }
 
 static void show_action_auto_dialog(AppWidgets *widgets, const char *message) {
@@ -363,7 +419,7 @@ static void show_action_auto_dialog(AppWidgets *widgets, const char *message) {
 
     if (
         strstr(message, "errore") != NULL ||
-        strstr(message, "Errore") != NULL ||
+        strstr(message, tr_key("dialog.error")) != NULL ||
         strstr(message, "fallito") != NULL ||
         strstr(message, "fallita") != NULL ||
         strstr(message, "NON chiuso") != NULL ||
@@ -532,7 +588,7 @@ static void refresh_trade_history(AppWidgets *widgets) {
     clear_trade_list(widgets->trade_list);
 
     if (count == 0) {
-        GtkWidget *row_label = gtk_label_new("Nessuna operazione registrata");
+        GtkWidget *row_label = gtk_label_new(tr_key("empty.trades"));
         gtk_widget_set_halign(row_label, GTK_ALIGN_START);
         gtk_list_box_append(GTK_LIST_BOX(widgets->trade_list), row_label);
         return;
@@ -571,7 +627,7 @@ static void refresh_engine_audit(AppWidgets *widgets) {
     clear_trade_list(widgets->audit_list);
 
     if (count == 0) {
-        GtkWidget *row_label = gtk_label_new("Nessuna decisione motore registrata");
+        GtkWidget *row_label = gtk_label_new(tr_key("empty.audit"));
         gtk_widget_set_halign(row_label, GTK_ALIGN_START);
         gtk_list_box_append(GTK_LIST_BOX(widgets->audit_list), row_label);
         return;
@@ -629,15 +685,15 @@ static void refresh_dashboard(AppWidgets *widgets) {
     char settings_text[768];
 
     snprintf(price_text, sizeof(price_text), "BTC-EUR: %.2f €", widgets->state->current_price);
-    snprintf(eur_text, sizeof(eur_text), "EUR disponibili: %.2f", widgets->state->eur_balance);
-    snprintf(btc_text, sizeof(btc_text), "BTC detenuti: %.8f", widgets->state->btc_balance);
-    snprintf(slots_text, sizeof(slots_text), "Slot usati: %d / %d", widgets->state->used_slots, widgets->state->max_slots);
-    snprintf(mode_text, sizeof(mode_text), "Modalità motore: %s", bot_mode_to_string(widgets->state->mode));
-    snprintf(runtime_mode_text, sizeof(runtime_mode_text), "Modalità operativa: %s", runtime_mode_to_string(settings.runtime_mode));
+    snprintf(eur_text, sizeof(eur_text), "%s: %.2f", tr_key("dashboard.eur_available"), widgets->state->eur_balance);
+    snprintf(btc_text, sizeof(btc_text), "%s: %.8f", tr_key("dashboard.btc_held"), widgets->state->btc_balance);
+    snprintf(slots_text, sizeof(slots_text), "%s: %d / %d", tr_key("dashboard.slots_used"), widgets->state->used_slots, widgets->state->max_slots);
+    snprintf(mode_text, sizeof(mode_text), "%s: %s", tr_key("dashboard.engine_mode"), bot_mode_to_string(widgets->state->mode));
+    snprintf(runtime_mode_text, sizeof(runtime_mode_text), "%s: %s", tr_key("dashboard.runtime_mode"), runtime_mode_to_string(settings.runtime_mode));
     snprintf(
         live_readiness_text,
         sizeof(live_readiness_text),
-        "Stato pre-live: %s | blocchi %d | warning %d | %s",
+        tr_key("dashboard.prelive_fmt"),
         readiness.status,
         readiness.blocking_count,
         readiness.warning_count,
@@ -647,17 +703,17 @@ static void refresh_dashboard(AppWidgets *widgets) {
     snprintf(
         api_health_text,
         sizeof(api_health_text),
-        "API health: %s | blocchi %d | warning %d | %s",
+        tr_key("dashboard.api_health_fmt"),
         api_health.status,
         api_health.blocking_count,
         api_health.warning_count,
         api_health.reason
     );
-    snprintf(last_trade_text, sizeof(last_trade_text), "Ultima operazione: %s", widgets->state->last_trade);
+    snprintf(last_trade_text, sizeof(last_trade_text), "%s: %s", tr_key("dashboard.last_trade"), widgets->state->last_trade);
     snprintf(
         settings_text,
         sizeof(settings_text),
-        "Strategia: slot %.2f € | buy drop %.2f%% | sell %.2f%% | fee stimata %.2f%% | min profit %.2f € / %.2f%% | liquidità min %.2f%% | riserva %.2f%% | slot riserva sbloccati %d | max slot %d | audit %d giorni | max ordini/giorno %d | cooldown %d sec | max loss %.2f € | max drawdown %.2f%% | micro-live %s | max micro ordine %.2f € | stop dopo ordine %s | accumulo %s | kill-switch %s | live arm %s",
+        tr_key("dashboard.strategy_fmt"),
         settings.slot_amount_eur,
         settings.buy_drop_percent,
         settings.sell_profit_percent,
@@ -673,12 +729,12 @@ static void refresh_dashboard(AppWidgets *widgets) {
         settings.order_cooldown_seconds,
         settings.max_daily_loss_eur,
         settings.max_drawdown_percent,
-        settings.micro_live_enabled ? "ATTIVO" : "disattivato",
+        settings.micro_live_enabled ? tr_key("word.active") : tr_key("word.disabled"),
         settings.micro_live_max_order_eur,
-        settings.micro_live_stop_after_real_order ? "ATTIVO" : "disattivato",
-        settings.micro_live_allow_accumulation ? "ATTIVO" : "disattivato",
-        settings.emergency_stop_enabled ? "ATTIVO" : "disattivato",
-        settings.live_trading_armed ? "ATTIVO" : "disattivato"
+        settings.micro_live_stop_after_real_order ? tr_key("word.active") : tr_key("word.disabled"),
+        settings.micro_live_allow_accumulation ? tr_key("word.active") : tr_key("word.disabled"),
+        settings.emergency_stop_enabled ? tr_key("word.active") : tr_key("word.disabled"),
+        settings.live_trading_armed ? tr_key("word.active") : tr_key("word.disabled")
     );
 
     gtk_label_set_text(GTK_LABEL(widgets->price_label), price_text);
@@ -700,10 +756,25 @@ static void refresh_dashboard(AppWidgets *widgets) {
     refresh_engine_audit(widgets);
 }
 
-static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
-    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *label = gtk_label_new(label_text);
+static void apply_i18n_key(GtkWidget *widget, const char *key) {
+    if (widget == NULL || key == NULL) {
+        return;
+    }
 
+    g_object_set_data(G_OBJECT(widget), "helix-i18n-key", (gpointer)key);
+
+    if (GTK_IS_LABEL(widget)) {
+        gtk_label_set_text(GTK_LABEL(widget), tr_key(key));
+    } else if (GTK_IS_BUTTON(widget)) {
+        gtk_button_set_label(GTK_BUTTON(widget), tr_key(key));
+    }
+}
+
+static GtkWidget *create_setting_row_i18n(const char *label_key, GtkWidget *entry) {
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *label = gtk_label_new(tr_key(label_key));
+
+    apply_i18n_key(label, label_key);
     gtk_widget_add_css_class(label, "setting-label");
     gtk_widget_set_size_request(label, 180, -1);
     gtk_widget_set_halign(label, GTK_ALIGN_START);
@@ -719,6 +790,47 @@ static GtkWidget *create_setting_row(const char *label_text, GtkWidget *entry) {
 
     return row;
 }
+
+static GtkWidget *create_i18n_button(const char *label_key) {
+    GtkWidget *button = gtk_button_new_with_label(tr_key(label_key));
+    apply_i18n_key(button, label_key);
+    return button;
+}
+
+static GtkWidget *create_section_title_i18n(const char *title_key) {
+    GtkWidget *label = gtk_label_new(tr_key(title_key));
+
+    apply_i18n_key(label, title_key);
+    gtk_widget_add_css_class(label, "section-title");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
+
+    return label;
+}
+
+static void refresh_i18n_recursive(GtkWidget *widget) {
+    GtkWidget *child;
+    const char *key;
+
+    if (widget == NULL) {
+        return;
+    }
+
+    key = g_object_get_data(G_OBJECT(widget), "helix-i18n-key");
+    if (key != NULL) {
+        if (GTK_IS_LABEL(widget)) {
+            gtk_label_set_text(GTK_LABEL(widget), tr_key(key));
+        } else if (GTK_IS_BUTTON(widget)) {
+            gtk_button_set_label(GTK_BUTTON(widget), tr_key(key));
+        }
+    }
+
+    for (child = gtk_widget_get_first_child(widget); child != NULL; child = gtk_widget_get_next_sibling(child)) {
+        refresh_i18n_recursive(child);
+    }
+}
+
 
 static void configure_button_box(GtkWidget *box) {
     if (box == NULL) {
@@ -736,17 +848,6 @@ static void configure_action_button(GtkWidget *button) {
 
     gtk_widget_add_css_class(button, "dialog-action-button");
     gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
-}
-
-static GtkWidget *create_section_title(const char *title) {
-    GtkWidget *label = gtk_label_new(title);
-
-    gtk_widget_add_css_class(label, "section-title");
-    gtk_widget_set_halign(label, GTK_ALIGN_START);
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
-    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
-
-    return label;
 }
 
 static void configure_dashboard_label(GtkWidget *label) {
@@ -775,42 +876,102 @@ static GtkWidget *create_main_menu_bar(void) {
     GMenu *menu_bar_model = g_menu_new();
 
     GMenu *file_menu = g_menu_new();
-    g_menu_append(file_menu, "Start bot", "win.start-bot");
-    g_menu_append(file_menu, "Stop bot", "win.stop-bot");
-    g_menu_append(file_menu, "Esci", "win.quit");
-    g_menu_append_submenu(menu_bar_model, "File", G_MENU_MODEL(file_menu));
+    g_menu_append(file_menu, tr_key("menu.start_bot"), "win.start-bot");
+    g_menu_append(file_menu, tr_key("menu.stop_bot"), "win.stop-bot");
+    g_menu_append(file_menu, tr_key("menu.quit"), "win.quit");
+    g_menu_append_submenu(menu_bar_model, tr_key("menu.file"), G_MENU_MODEL(file_menu));
     g_object_unref(file_menu);
 
     GMenu *preferences_menu = g_menu_new();
-    g_menu_append(preferences_menu, "Impostazioni strategia", "win.show-strategy-settings");
-    g_menu_append(preferences_menu, "Email report", "win.show-email-report");
-    g_menu_append(preferences_menu, "Coinbase API", "win.show-coinbase-api");
-    g_menu_append_submenu(menu_bar_model, "Preferenze", G_MENU_MODEL(preferences_menu));
+    g_menu_append(preferences_menu, tr_key("menu.strategy_settings"), "win.show-strategy-settings");
+    g_menu_append(preferences_menu, tr_key("menu.email_report"), "win.show-email-report");
+    g_menu_append(preferences_menu, tr_key("label.language"), "win.show-language-settings");
+    g_menu_append(preferences_menu, tr_key("menu.coinbase_api"), "win.show-coinbase-api");
+    g_menu_append_submenu(menu_bar_model, tr_key("menu.preferences"), G_MENU_MODEL(preferences_menu));
     g_object_unref(preferences_menu);
 
     GMenu *view_menu = g_menu_new();
-    g_menu_append(view_menu, "Storico operazioni", "win.show-trades-table");
-    g_menu_append(view_menu, "Audit decisioni", "win.show-engine-audit-table");
-    g_menu_append(view_menu, "Tabella slot reali", "win.show-position-slots-table");
-    g_menu_append(view_menu, "Tabella order journal", "win.show-order-journal-table");
-    g_menu_append(view_menu, "Report pre-live", "win.show-prelive-report");
-    g_menu_append(view_menu, "Stato protezioni", "win.show-safety-status");
-    g_menu_append(view_menu, "Simula scenario dry-run", "win.show-dryrun-scenario");
-    g_menu_append(view_menu, "Esporta report pre-live", "win.export-prelive-report");
-    g_menu_append(view_menu, "Esporta snapshot stato", "win.export-status-snapshot");
-    g_menu_append_submenu(menu_bar_model, "Visualizza", G_MENU_MODEL(view_menu));
+    g_menu_append(view_menu, tr_key("menu.trade_history"), "win.show-trades-table");
+    g_menu_append(view_menu, tr_key("menu.engine_audit"), "win.show-engine-audit-table");
+    g_menu_append(view_menu, tr_key("menu.real_slots"), "win.show-position-slots-table");
+    g_menu_append(view_menu, tr_key("menu.order_journal"), "win.show-order-journal-table");
+    g_menu_append(view_menu, tr_key("menu.prelive_report"), "win.show-prelive-report");
+    g_menu_append(view_menu, tr_key("menu.safety_status"), "win.show-safety-status");
+    g_menu_append(view_menu, tr_key("menu.dryrun_scenario"), "win.show-dryrun-scenario");
+    g_menu_append(view_menu, tr_key("menu.export_prelive"), "win.export-prelive-report");
+    g_menu_append(view_menu, tr_key("menu.export_snapshot"), "win.export-status-snapshot");
+    g_menu_append_submenu(menu_bar_model, tr_key("menu.view"), G_MENU_MODEL(view_menu));
     g_object_unref(view_menu);
 
     GMenu *help_menu = g_menu_new();
-    g_menu_append(help_menu, "Guida", "win.show-help");
-    g_menu_append(help_menu, "Informazioni su...", "win.show-about");
-    g_menu_append_submenu(menu_bar_model, "?", G_MENU_MODEL(help_menu));
+    g_menu_append(help_menu, tr_key("menu.help"), "win.show-help");
+    g_menu_append(help_menu, tr_key("menu.about"), "win.show-about");
+    g_menu_append_submenu(menu_bar_model, tr_key("menu.help_root"), G_MENU_MODEL(help_menu));
     g_object_unref(help_menu);
 
     GtkWidget *menu_bar = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(menu_bar_model));
     g_object_unref(menu_bar_model);
 
     return menu_bar;
+}
+
+static void refresh_ui_language(AppWidgets *widgets) {
+    GtkWidget *new_menu_bar;
+
+    if (widgets == NULL) {
+        return;
+    }
+
+    if (widgets->window != NULL) {
+        gtk_window_set_title(GTK_WINDOW(widgets->window), tr_key("app.title"));
+    }
+
+    if (widgets->language_window != NULL) {
+        gtk_window_set_title(GTK_WINDOW(widgets->language_window), tr_key("label.language"));
+    }
+
+    refresh_i18n_recursive(widgets->window);
+    refresh_i18n_recursive(widgets->settings_expander);
+    refresh_i18n_recursive(widgets->email_expander);
+    refresh_i18n_recursive(widgets->coinbase_expander);
+    refresh_i18n_recursive(widgets->language_window);
+    refresh_i18n_recursive(widgets->history_scrolled_window);
+    refresh_i18n_recursive(widgets->audit_scrolled_window);
+    refresh_dashboard(widgets);
+
+    if (
+        widgets->root_box != NULL &&
+        widgets->menu_bar != NULL &&
+        gtk_widget_get_parent(widgets->menu_bar) != NULL
+    ) {
+        new_menu_bar = create_main_menu_bar();
+        gtk_box_remove(GTK_BOX(widgets->root_box), widgets->menu_bar);
+        gtk_box_prepend(GTK_BOX(widgets->root_box), new_menu_bar);
+        widgets->menu_bar = new_menu_bar;
+    }
+}
+
+static void on_language_save_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->language_dropdown == NULL) {
+        return;
+    }
+
+    save_ui_language(
+        dropdown_index_to_language(
+            gtk_drop_down_get_selected(GTK_DROP_DOWN(widgets->language_dropdown))
+        )
+    );
+
+    refresh_ui_language(widgets);
+    set_temporary_status_message(widgets, tr_key("message.language_saved"));
+
+    if (widgets->language_window != NULL) {
+        gtk_widget_set_visible(widgets->language_window, FALSE);
+    }
 }
 
 static gboolean on_hide_window_close_request(GtkWindow *window, gpointer user_data) {
@@ -881,7 +1042,7 @@ static void show_text_dialog(AppWidgets *widgets, const char *title, const char 
         content_widget = label;
     }
 
-    button = gtk_button_new_with_label("Chiudi");
+    button = create_i18n_button("button.close");
     gtk_widget_set_halign(button, GTK_ALIGN_END);
 
     gtk_box_append(GTK_BOX(box), content_widget);
@@ -1827,8 +1988,8 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
         settings.micro_live_max_order_eur <= 0.0 ||
         settings.micro_live_max_order_eur > 50.0
     ) {
-        set_temporary_status_message(widgets, "Errore: impostazioni non valide");
-    show_action_error_dialog(widgets, "Errore: impostazioni non valide");
+        set_temporary_status_message(widgets, tr_key("message.invalid_settings"));
+    show_action_error_dialog(widgets, tr_key("message.invalid_settings"));
         return;
     }
 
@@ -1838,11 +1999,11 @@ static void on_save_settings_clicked(GtkButton *button, gpointer user_data) {
     db_save_state(widgets->state);
 
     if (settings.runtime_mode == RUNTIME_MODE_LIVE_TRADING) {
-        set_temporary_status_message(widgets, "LIVE_TRADING salvato ma bloccato dai safety checks");
-    show_action_warning_dialog(widgets, "LIVE_TRADING salvato ma bloccato dai safety checks");
+        set_temporary_status_message(widgets, tr_key("message.live_trading_saved_blocked"));
+    show_action_warning_dialog(widgets, tr_key("message.live_trading_saved_blocked"));
     } else {
-        set_temporary_status_message(widgets, "Impostazioni salvate");
-    show_action_info_dialog(widgets, "Impostazioni salvate");
+        set_temporary_status_message(widgets, tr_key("message.settings_saved"));
+    show_action_info_dialog(widgets, tr_key("message.settings_saved"));
     }
 
     refresh_dashboard(widgets);
@@ -1860,8 +2021,8 @@ static void on_start_clicked(GtkButton *button, gpointer user_data) {
     widgets->state->running = true;
     db_save_state(widgets->state);
 
-    set_temporary_status_message(widgets, "Bot avviato");
-    show_action_info_dialog(widgets, "Bot avviato");
+    set_temporary_status_message(widgets, tr_key("message.bot_started"));
+    show_action_info_dialog(widgets, tr_key("message.bot_started"));
 
     refresh_dashboard(widgets);
 }
@@ -1879,8 +2040,8 @@ static void on_stop_clicked(GtkButton *button, gpointer user_data) {
     widgets->state->mode = BOT_MODE_PAUSED;
     db_save_state(widgets->state);
 
-    set_temporary_status_message(widgets, "Bot fermato");
-    show_action_warning_dialog(widgets, "Bot fermato");
+    set_temporary_status_message(widgets, tr_key("message.bot_stopped"));
+    show_action_warning_dialog(widgets, tr_key("message.bot_stopped"));
 
     refresh_dashboard(widgets);
 }
@@ -2140,7 +2301,7 @@ static void show_dryrun_scenario_dialog(AppWidgets *widgets) {
     }
 
     GtkWidget *dialog = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dialog), "Simula scenario dry-run");
+    gtk_window_set_title(GTK_WINDOW(dialog), tr_key("dryrun.title"));
     gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(widgets->window));
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(dialog), 760, -1);
@@ -2151,10 +2312,7 @@ static void show_dryrun_scenario_dialog(AppWidgets *widgets) {
     gtk_widget_set_margin_start(box, 18);
     gtk_widget_set_margin_end(box, 18);
 
-    GtkWidget *description = gtk_label_new(
-        "Inserisci valori ipotetici per vedere cosa farebbe Helix in dry-run. "
-        "La simulazione non modifica wallet, DB, Coinbase o ordini."
-    );
+    GtkWidget *description = gtk_label_new(tr_key("dryrun.description"));
     gtk_label_set_wrap(GTK_LABEL(description), TRUE);
     gtk_widget_set_halign(description, GTK_ALIGN_START);
 
@@ -2183,19 +2341,19 @@ static void show_dryrun_scenario_dialog(AppWidgets *widgets) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(result_scrolled), result_label);
 
     GtkWidget *buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *calculate_button = gtk_button_new_with_label("Calcola scenario");
-    GtkWidget *use_current_button = gtk_button_new_with_label("Usa valori correnti");
-    GtkWidget *close_button = gtk_button_new_with_label("Chiudi");
+    GtkWidget *calculate_button = create_i18n_button("button.calculate_scenario");
+    GtkWidget *use_current_button = create_i18n_button("button.use_current_values");
+    GtkWidget *close_button = create_i18n_button("button.close");
 
     gtk_box_append(GTK_BOX(buttons_box), calculate_button);
     gtk_box_append(GTK_BOX(buttons_box), use_current_button);
     gtk_box_append(GTK_BOX(buttons_box), close_button);
 
     gtk_box_append(GTK_BOX(box), description);
-    gtk_box_append(GTK_BOX(box), create_setting_row("EUR simulati", eur_entry));
-    gtk_box_append(GTK_BOX(box), create_setting_row("BTC simulati", btc_entry));
-    gtk_box_append(GTK_BOX(box), create_setting_row("Prezzo BTC-EUR simulato", price_entry));
-    gtk_box_append(GTK_BOX(box), create_setting_row("Slot usati simulati", used_slots_entry));
+    gtk_box_append(GTK_BOX(box), create_setting_row_i18n("dryrun.eur", eur_entry));
+    gtk_box_append(GTK_BOX(box), create_setting_row_i18n("dryrun.btc", btc_entry));
+    gtk_box_append(GTK_BOX(box), create_setting_row_i18n("dryrun.price", price_entry));
+    gtk_box_append(GTK_BOX(box), create_setting_row_i18n("dryrun.used_slots", used_slots_entry));
     gtk_box_append(GTK_BOX(box), buttons_box);
     gtk_box_append(GTK_BOX(box), result_scrolled);
 
@@ -2276,7 +2434,7 @@ static void show_sql_table_window(
     }
 
     if (sqlite3_open("data/helix.db", &db) != SQLITE_OK) {
-        show_text_dialog(widgets, title, "Impossibile aprire data/helix.db");
+        show_text_dialog(widgets, title, tr_key("message.db_open_error"));
         return;
     }
 
@@ -2298,7 +2456,7 @@ static void show_sql_table_window(
     column_count = sqlite3_column_count(stmt);
 
     window = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(window), title ? title : "Tabella Helix");
+    gtk_window_set_title(GTK_WINDOW(window), title ? title : tr_key("table.helix"));
     gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(widgets->window));
     gtk_window_set_default_size(GTK_WINDOW(window), default_width, default_height);
 
@@ -2345,15 +2503,15 @@ static void show_sql_table_window(
         char status_text[128];
 
         if (sqlite_rc == SQLITE_DONE) {
-            snprintf(status_text, sizeof(status_text), "Righe visualizzate: %d", row - 1);
+            snprintf(status_text, sizeof(status_text), "%s: %d", tr_key("message.rows_displayed"), row - 1);
         } else {
-            snprintf(status_text, sizeof(status_text), "Righe visualizzate: %d | errore lettura", row - 1);
+            snprintf(status_text, sizeof(status_text), "%s: %d | %s", tr_key("message.rows_displayed"), row - 1, tr_key("message.read_error"));
         }
 
         status_label = gtk_label_new(status_text);
     }
 
-    close_button = gtk_button_new_with_label("Chiudi");
+    close_button = create_i18n_button("button.close");
 
     gtk_box_append(GTK_BOX(footer_box), status_label);
     gtk_box_append(GTK_BOX(footer_box), close_button);
@@ -2429,6 +2587,24 @@ static void on_menu_show_email_report_action(GSimpleAction *action, GVariant *pa
     set_temporary_status_message(widgets, "Preferenze: email report aperte");
 }
 
+static void on_menu_show_language_settings_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    (void)parameter;
+
+    AppWidgets *widgets = user_data;
+
+    if (widgets == NULL || widgets->language_window == NULL || widgets->language_dropdown == NULL) {
+        return;
+    }
+
+    gtk_drop_down_set_selected(
+        GTK_DROP_DOWN(widgets->language_dropdown),
+        language_to_dropdown_index(current_ui_language())
+    );
+
+    present_utility_window(widgets->language_window);
+}
+
 static void on_menu_show_coinbase_api_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action;
     (void)parameter;
@@ -2483,7 +2659,7 @@ static void on_menu_show_position_slots_table_action(GSimpleAction *action, GVar
 
     show_sql_table_window(
         widgets,
-        "Tabella slot reali",
+        tr_key("menu.real_slots"),
         "SELECT id, buy_order_id, buy_client_order_id, base_size_btc, cost_eur, "
         "buy_fee_eur, cost_eur + buy_fee_eur AS allocated_cost, avg_buy_price, "
         "status, opened_at, closed_at, sell_order_id, sell_net_eur, realized_profit_eur "
@@ -2507,7 +2683,7 @@ static void on_menu_show_trades_table_action(GSimpleAction *action, GVariant *pa
 
     show_sql_table_window(
         widgets,
-        "Tabella trades",
+        tr_key("title.trades_table"),
         "SELECT id, type, price, eur_amount, btc_amount, fee_amount, net_total, "
         "reference, source, created_at "
         "FROM trades "
@@ -2530,7 +2706,7 @@ static void on_menu_show_order_journal_table_action(GSimpleAction *action, GVari
 
     show_sql_table_window(
         widgets,
-        "Tabella order journal",
+        tr_key("menu.order_journal"),
         "SELECT id, client_order_id, side, dry_run, status, phase, decision, "
         "requested_quote_size, requested_base_size, preview_total_eur, preview_fee_eur, "
         "preview_base_size, preview_avg_price, coinbase_order_id, execution_decision, "
@@ -2555,7 +2731,7 @@ static void on_menu_show_engine_audit_table_action(GSimpleAction *action, GVaria
 
     show_sql_table_window(
         widgets,
-        "Tabella engine audit",
+        tr_key("title.engine_audit_table"),
         "SELECT id, created_at, event_type, decision, price, btc_amount, eur_amount, "
         "estimated_fee, net_profit, substr(reason, 1, 180) AS reason "
         "FROM engine_audit "
@@ -2571,6 +2747,85 @@ static void on_menu_show_engine_audit_table_action(GSimpleAction *action, GVaria
 }
 
 
+
+static void replace_all_report_text(char *buffer, size_t buffer_size, const char *needle, const char *replacement) {
+    char temp[16384];
+    char *write_ptr = temp;
+    char *read_ptr;
+    char *match;
+    size_t needle_len;
+    size_t replacement_len;
+    size_t remaining;
+
+    if (
+        buffer == NULL ||
+        buffer_size == 0 ||
+        needle == NULL ||
+        replacement == NULL ||
+        needle[0] == '\0' ||
+        strlen(buffer) >= sizeof(temp)
+    ) {
+        return;
+    }
+
+    temp[0] = '\0';
+    read_ptr = buffer;
+    needle_len = strlen(needle);
+    replacement_len = strlen(replacement);
+    remaining = sizeof(temp) - 1;
+
+    while ((match = strstr(read_ptr, needle)) != NULL) {
+        size_t prefix_len = (size_t)(match - read_ptr);
+
+        if (prefix_len > remaining) {
+            break;
+        }
+
+        memcpy(write_ptr, read_ptr, prefix_len);
+        write_ptr += prefix_len;
+        remaining -= prefix_len;
+
+        if (replacement_len > remaining) {
+            break;
+        }
+
+        memcpy(write_ptr, replacement, replacement_len);
+        write_ptr += replacement_len;
+        remaining -= replacement_len;
+
+        read_ptr = match + needle_len;
+    }
+
+    if (strlen(read_ptr) > remaining) {
+        return;
+    }
+
+    snprintf(write_ptr, remaining + 1, "%s", read_ptr);
+    snprintf(buffer, buffer_size, "%s", temp);
+}
+
+static void localize_generated_report_text(char *message, size_t message_size) {
+    if (current_ui_language() == HELIX_LANG_IT) {
+        return;
+    }
+
+    replace_all_report_text(message, message_size, "STATO GENERALE", tr_key("report.general_status"));
+    replace_all_report_text(message, message_size, "Stato:", tr_key("report.status"));
+    replace_all_report_text(message, message_size, "Blocchi:", tr_key("report.blocks"));
+    replace_all_report_text(message, message_size, "Motivo:", tr_key("report.reason"));
+    replace_all_report_text(message, message_size, "Riserva liquidità", tr_key("report.liquidity_reserve"));
+    replace_all_report_text(message, message_size, "slot sbloccati", tr_key("report.released_slots"));
+    replace_all_report_text(message, message_size, "DRY-RUN E JOURNAL", tr_key("report.dryrun_journal"));
+    replace_all_report_text(message, message_size, "SAFETY BLOCKS ULTIMI 7 GIORNI", tr_key("report.safety_blocks_7d"));
+    replace_all_report_text(message, message_size, "RACCOMANDAZIONI", tr_key("report.recommendations"));
+    replace_all_report_text(message, message_size, "avviato", tr_key("word.running"));
+    replace_all_report_text(message, message_size, "fermo", tr_key("word.stopped"));
+    replace_all_report_text(message, message_size, "ATTIVO", tr_key("word.active"));
+    replace_all_report_text(message, message_size, "disattivato", tr_key("word.disabled"));
+    replace_all_report_text(message, message_size, "protetta", tr_key("word.protected"));
+    replace_all_report_text(message, message_size, "parzialmente sbloccata", tr_key("word.partially_released"));
+}
+
 static void build_prelive_report_message(AppWidgets *widgets, char *message, size_t message_size) {
     if (message == NULL || message_size == 0) {
         return;
@@ -2579,7 +2834,7 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
     message[0] = '\0';
 
     if (widgets == NULL || widgets->state == NULL) {
-        snprintf(message, message_size, "Report pre-live non disponibile: stato applicazione non valido.");
+        snprintf(message, message_size, "%s", tr_key("report.prelive_unavailable"));
         return;
     }
 
@@ -2615,8 +2870,8 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
 
     const char *runtime_label = runtime_mode_to_string(settings.runtime_mode);
     const char *bot_running_label = widgets->state->running ? "avviato" : "fermo";
-    const char *kill_switch_label = settings.emergency_stop_enabled ? "ATTIVO" : "disattivato";
-    const char *live_arm_label = settings.live_trading_armed ? "ATTIVO" : "disattivato";
+    const char *kill_switch_label = settings.emergency_stop_enabled ? tr_key("word.active") : tr_key("word.disabled");
+    const char *live_arm_label = settings.live_trading_armed ? tr_key("word.active") : tr_key("word.disabled");
     const char *reserve_label = settings.reserve_released_slots > 0 ? "parzialmente sbloccata" : "protetta";
 
     const char *prelive_status = "NON PRONTO";
@@ -2711,7 +2966,7 @@ static void build_prelive_report_message(AppWidgets *widgets, char *message, siz
         reserve_label,
         settings.reserve_released_slots,
         settings.max_slots,
-        settings.micro_live_allow_accumulation ? "ATTIVO" : "disattivato",
+        settings.micro_live_allow_accumulation ? tr_key("word.active") : tr_key("word.disabled"),
 
         readiness.status,
         readiness.blocking_count,
@@ -2794,10 +3049,11 @@ static void on_menu_show_prelive_report_action(GSimpleAction *action, GVariant *
     char message[8192];
 
     build_prelive_report_message(widgets, message, sizeof(message));
+    localize_generated_report_text(message, sizeof(message));
 
     show_text_dialog(
         widgets,
-        "Report pre-live",
+        tr_key("menu.prelive_report"),
         message
     );
 
@@ -2818,6 +3074,7 @@ static void on_menu_export_prelive_report_action(GSimpleAction *action, GVariant
     FILE *file;
 
     build_prelive_report_message(widgets, report, sizeof(report));
+    localize_generated_report_text(report, sizeof(report));
 
     now = time(NULL);
     local_time = localtime(&now);
@@ -2825,7 +3082,7 @@ static void on_menu_export_prelive_report_action(GSimpleAction *action, GVariant
     if (local_time != NULL) {
         strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local_time);
     } else {
-        snprintf(timestamp, sizeof(timestamp), "timestamp non disponibile");
+        snprintf(timestamp, sizeof(timestamp), "%s", tr_key("report.timestamp_unavailable"));
     }
 
     file = fopen("data/prelive_report.txt", "w");
@@ -2838,13 +3095,13 @@ static void on_menu_export_prelive_report_action(GSimpleAction *action, GVariant
     }
 
     fprintf(file, "Helix - Report pre-live\n");
-    fprintf(file, "Generato: %s\n\n", timestamp);
+    fprintf(file, "%s: %s\n\n", tr_key("report.generated"), timestamp);
     fprintf(file, "%s\n", report);
     fclose(file);
 
     set_temporary_status_message(
         widgets,
-        "Report pre-live esportato in data/prelive_report.txt"
+        tr_key("report.exported_prelive")
     );
 }
 
@@ -2856,7 +3113,7 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
     message[0] = '\0';
 
     if (widgets == NULL || widgets->state == NULL) {
-        snprintf(message, message_size, "Stato protezioni non disponibile: stato applicazione non valido.");
+        snprintf(message, message_size, "%s", tr_key("report.safety_unavailable"));
         return;
     }
 
@@ -2929,8 +3186,8 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         widgets->state->used_slots,
         widgets->state->max_slots,
 
-        settings.emergency_stop_enabled ? "ATTIVO" : "disattivato",
-        settings.live_trading_armed ? "ATTIVO" : "disattivato",
+        settings.emergency_stop_enabled ? tr_key("word.active") : tr_key("word.disabled"),
+        settings.live_trading_armed ? tr_key("word.active") : tr_key("word.disabled"),
         readiness.status,
         readiness.blocking_count,
         readiness.warning_count,
@@ -2950,10 +3207,10 @@ static void build_safety_status_message(AppWidgets *widgets, char *message, size
         settings.order_cooldown_seconds,
         settings.max_daily_loss_eur,
         settings.max_drawdown_percent,
-        settings.micro_live_enabled ? "ATTIVO" : "disattivato",
+        settings.micro_live_enabled ? tr_key("word.active") : tr_key("word.disabled"),
         settings.micro_live_max_order_eur,
-        settings.micro_live_stop_after_real_order ? "ATTIVO" : "disattivato",
-        settings.micro_live_allow_accumulation ? "ATTIVO" : "disattivato",
+        settings.micro_live_stop_after_real_order ? tr_key("word.active") : tr_key("word.disabled"),
+        settings.micro_live_allow_accumulation ? tr_key("word.active") : tr_key("word.disabled"),
         settings.volatility_max_move_percent,
         settings.volatility_window_seconds,
 
@@ -2979,10 +3236,11 @@ static void on_menu_show_safety_status_action(GSimpleAction *action, GVariant *p
     char message[4096];
 
     build_safety_status_message(widgets, message, sizeof(message));
+    localize_generated_report_text(message, sizeof(message));
 
     show_text_dialog(
         widgets,
-        "Stato protezioni",
+        tr_key("menu.safety_status"),
         message
     );
 
@@ -3010,7 +3268,7 @@ static void on_menu_export_status_snapshot_action(GSimpleAction *action, GVarian
     if (local_time != NULL) {
         strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local_time);
     } else {
-        snprintf(timestamp, sizeof(timestamp), "timestamp non disponibile");
+        snprintf(timestamp, sizeof(timestamp), "%s", tr_key("report.timestamp_unavailable"));
     }
 
     file = fopen("data/status_snapshot.txt", "w");
@@ -3024,7 +3282,7 @@ static void on_menu_export_status_snapshot_action(GSimpleAction *action, GVarian
     }
 
     fprintf(file, "Helix - Snapshot stato\n");
-    fprintf(file, "Generato: %s\n\n", timestamp);
+    fprintf(file, "%s: %s\n\n", tr_key("report.generated"), timestamp);
     fprintf(file, "%s\n\n", safety_status);
     fprintf(file, "%s\n", prelive_report);
     fclose(file);
@@ -3054,7 +3312,7 @@ static void on_menu_show_help_action(GSimpleAction *action, GVariant *parameter,
 
     show_text_dialog(
         widgets,
-        "Guida Helix",
+        tr_key("title.help"),
         "File: avvia, ferma o chiude Helix.\n\n"
         "Preferenze: apre impostazioni strategia, email report e Coinbase API in finestre dedicate.\n\n"
         "Visualizza: apre storico operazioni, audit decisioni, slot reali e journal in viste tabellari.\n\n"
@@ -3070,7 +3328,7 @@ static void on_menu_show_about_action(GSimpleAction *action, GVariant *parameter
 
     show_text_dialog(
         widgets,
-        "Informazioni su Helix",
+        tr_key("title.about"),
         "Helix\n\n"
         "C/GTK4 BTC-EUR trading engine pre-live.\n\n"
         "Supporta simulazione, LIVE_READONLY, preview Coinbase, safety gate, dry-run executor e journal.\n\n"
@@ -3184,6 +3442,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *clear_paper_slots_button;
     GtkWidget *run_paper_best_profit_button;
     GtkWidget *runtime_mode_dropdown;
+    GtkWidget *language_dropdown;
     GtkWidget *save_settings_button;
     GtkWidget *emergency_buttons_box;
     GtkWidget *activate_emergency_stop_button;
@@ -3197,6 +3456,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *coinbase_api_key_entry;
     GtkWidget *coinbase_api_secret_entry;
     GtkWidget *save_coinbase_button;
+    GtkWidget *language_window;
+    GtkWidget *language_box;
+    GtkWidget *language_save_button;
 
     GtkWidget *history_title;
     GtkWidget *history_window;
@@ -3215,9 +3477,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     char slots_text[100];
 
     snprintf(price_text, sizeof(price_text), "BTC-EUR: %.2f €", state->current_price);
-    snprintf(eur_text, sizeof(eur_text), "EUR disponibili: %.2f", state->eur_balance);
-    snprintf(btc_text, sizeof(btc_text), "BTC detenuti: %.8f", state->btc_balance);
-    snprintf(slots_text, sizeof(slots_text), "Slot usati: %d / %d", state->used_slots, state->max_slots);
+    snprintf(eur_text, sizeof(eur_text), "%s: %.2f", tr_key("dashboard.eur_available"), state->eur_balance);
+    snprintf(btc_text, sizeof(btc_text), "%s: %.8f", tr_key("dashboard.btc_held"), state->btc_balance);
+    snprintf(slots_text, sizeof(slots_text), "%s: %d / %d", tr_key("dashboard.slots_used"), state->used_slots, state->max_slots);
 
     load_app_css();
 
@@ -3265,7 +3527,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     remote_wallet_label = gtk_label_new("");
     last_trade_label = gtk_label_new("");
     settings_label = gtk_label_new("");
-    line_status_label = gtk_label_new("Linea/API: stato non ancora verificato");
+    line_status_label = gtk_label_new(tr_key("label.line_unknown"));
     status_label = gtk_label_new("");
 
     configure_dashboard_label(price_label);
@@ -3284,7 +3546,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     configure_dashboard_label(status_label);
 
     settings_expander = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(settings_expander), "Impostazioni strategia");
+    gtk_window_set_title(GTK_WINDOW(settings_expander), tr_key("section.strategy_settings"));
     gtk_window_set_transient_for(GTK_WINDOW(settings_expander), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(settings_expander), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(settings_expander), 760, 680);
@@ -3343,13 +3605,28 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     runtime_mode_dropdown = gtk_drop_down_new_from_strings(runtime_modes);
     gtk_widget_add_css_class(runtime_mode_dropdown, "helix-dropdown");
 
-    save_settings_button = gtk_button_new_with_label("Salva impostazioni");
+    const char *language_options[] = {
+        "Italiano",
+        "English",
+        "Español",
+        "Português",
+        "Français",
+        NULL
+    };
+    language_dropdown = gtk_drop_down_new_from_strings(language_options);
+    gtk_widget_add_css_class(language_dropdown, "helix-dropdown");
+    gtk_drop_down_set_selected(
+        GTK_DROP_DOWN(language_dropdown),
+        language_to_dropdown_index(current_ui_language())
+    );
+
+    save_settings_button = create_i18n_button("button.save_settings");
     configure_action_button(save_settings_button);
     gtk_widget_add_css_class(save_settings_button, "primary-action");
 
     email_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    save_email_button = gtk_button_new_with_label("Salva preferenze email");
-    test_email_button = gtk_button_new_with_label("Test consegna email");
+    save_email_button = create_i18n_button("button.save_email");
+    test_email_button = create_i18n_button("button.test_email");
     configure_button_box(email_buttons_box);
     configure_action_button(save_email_button);
     configure_action_button(test_email_button);
@@ -3360,8 +3637,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_halign(emergency_stop_label, GTK_ALIGN_START);
 
     emergency_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    activate_emergency_stop_button = gtk_button_new_with_label("Attiva kill-switch");
-    reset_emergency_stop_button = gtk_button_new_with_label("Reset kill-switch");
+    activate_emergency_stop_button = create_i18n_button("button.activate_kill");
+    reset_emergency_stop_button = create_i18n_button("button.reset_kill");
     configure_button_box(emergency_buttons_box);
     configure_action_button(activate_emergency_stop_button);
     configure_action_button(reset_emergency_stop_button);
@@ -3372,9 +3649,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_halign(live_trading_arm_label, GTK_ALIGN_START);
 
     live_trading_arm_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    arm_live_trading_button = gtk_button_new_with_label("Arma LIVE_TRADING");
-    disarm_live_trading_button = gtk_button_new_with_label("Disarma LIVE_TRADING");
-    acknowledge_real_order_button = gtk_button_new_with_label("Acknowledge ultimo ordine reale");
+    arm_live_trading_button = create_i18n_button("button.arm_live");
+    disarm_live_trading_button = create_i18n_button("button.disarm_live");
+    acknowledge_real_order_button = create_i18n_button("button.ack_order");
     configure_button_box(live_trading_arm_buttons_box);
     configure_action_button(arm_live_trading_button);
     configure_action_button(disarm_live_trading_button);
@@ -3384,9 +3661,9 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(live_trading_arm_buttons_box), acknowledge_real_order_button);
 
     paper_slots_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    seed_paper_slots_button = gtk_button_new_with_label("Seed paper slots demo");
-    clear_paper_slots_button = gtk_button_new_with_label("Clear paper slots");
-    run_paper_best_profit_button = gtk_button_new_with_label("Run paper BEST_PROFIT");
+    seed_paper_slots_button = create_i18n_button("button.seed_paper");
+    clear_paper_slots_button = create_i18n_button("button.clear_paper");
+    run_paper_best_profit_button = create_i18n_button("button.run_best_profit");
     configure_button_box(paper_slots_buttons_box);
     configure_action_button(seed_paper_slots_button);
     configure_action_button(clear_paper_slots_button);
@@ -3396,50 +3673,50 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_box_append(GTK_BOX(paper_slots_buttons_box), run_paper_best_profit_button);
 
     reserve_buttons_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    release_reserve_slot_button = gtk_button_new_with_label("Sblocca 1 slot riserva");
-    lock_reserve_slot_button = gtk_button_new_with_label("Riblocca 1 slot riserva");
+    release_reserve_slot_button = create_i18n_button("button.release_reserve");
+    lock_reserve_slot_button = create_i18n_button("button.lock_reserve");
     configure_button_box(reserve_buttons_box);
     configure_action_button(release_reserve_slot_button);
     configure_action_button(lock_reserve_slot_button);
     gtk_box_append(GTK_BOX(reserve_buttons_box), release_reserve_slot_button);
     gtk_box_append(GTK_BOX(reserve_buttons_box), lock_reserve_slot_button);
 
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Slot EUR", slot_amount_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Buy drop %", buy_drop_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Sell profit lordo %", sell_profit_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Fee stimata %", estimated_fee_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Profitto minimo EUR", min_profit_eur_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Profitto minimo %", min_profit_percent_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Liquidità min %", min_liquidity_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Riserva protetta %", liquidity_reserve_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Slot riserva sbloccati", reserve_released_slots_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.slot_eur", slot_amount_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.buy_drop", buy_drop_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.sell_profit_gross", sell_profit_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.estimated_fee", estimated_fee_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.min_profit_eur", min_profit_eur_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.min_profit_percent", min_profit_percent_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.min_liquidity", min_liquidity_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.protected_reserve", liquidity_reserve_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.reserve_slots_unlocked", reserve_released_slots_entry));
     gtk_box_append(GTK_BOX(settings_box), reserve_buttons_box);
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Max slot", max_slots_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Conserva audit giorni", audit_retention_days_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Volatilità finestra sec", volatility_window_seconds_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Volatilità max movimento %", volatility_max_move_percent_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Max ordini al giorno", max_orders_per_day_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Cooldown ordini sec", order_cooldown_seconds_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Max perdita giornaliera EUR", max_daily_loss_eur_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Max drawdown %", max_drawdown_percent_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Micro-live attivo (0/1)", micro_live_enabled_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Micro-live max ordine EUR", micro_live_max_order_eur_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Stop dopo ordine reale (0/1)", micro_live_stop_after_real_order_entry));
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Consenti accumulo micro-live (0/1)", micro_live_allow_accumulation_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.max_slots", max_slots_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.audit_days", audit_retention_days_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.volatility_window", volatility_window_seconds_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.volatility_max_move", volatility_max_move_percent_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.max_orders_day", max_orders_per_day_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.cooldown_sec", order_cooldown_seconds_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.max_daily_loss", max_daily_loss_eur_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.max_drawdown", max_drawdown_percent_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.micro_live_enabled", micro_live_enabled_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.micro_live_max_order", micro_live_max_order_eur_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.stop_after_real_order", micro_live_stop_after_real_order_entry));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.allow_micro_accumulation", micro_live_allow_accumulation_entry));
 
     gtk_box_append(GTK_BOX(settings_box), emergency_stop_label);
     gtk_box_append(GTK_BOX(settings_box), emergency_buttons_box);
     gtk_box_append(GTK_BOX(settings_box), live_trading_arm_label);
     gtk_box_append(GTK_BOX(settings_box), live_trading_arm_buttons_box);
     gtk_box_append(GTK_BOX(settings_box), paper_slots_buttons_box);
-    gtk_box_append(GTK_BOX(settings_box), create_setting_row("Modalità operativa", runtime_mode_dropdown));
+    gtk_box_append(GTK_BOX(settings_box), create_setting_row_i18n("setting.runtime_mode", runtime_mode_dropdown));
     gtk_box_append(GTK_BOX(settings_box), save_settings_button);
 
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(settings_dialog_scrolled_window), settings_box);
     gtk_window_set_child(GTK_WINDOW(settings_expander), settings_dialog_scrolled_window);
 
     email_expander = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(email_expander), "Email report");
+    gtk_window_set_title(GTK_WINDOW(email_expander), tr_key("section.email_report"));
     gtk_window_set_transient_for(GTK_WINDOW(email_expander), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(email_expander), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(email_expander), 760, 360);
@@ -3454,21 +3731,21 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_margin_start(email_box, 10);
     gtk_widget_set_margin_end(email_box, 10);
 
-    gtk_box_append(GTK_BOX(email_box), create_section_title("Email report giornaliero"));
-    gtk_box_append(GTK_BOX(email_box), create_setting_row("Email giornaliera attiva (0/1)", email_daily_enabled_entry));
-    gtk_box_append(GTK_BOX(email_box), create_setting_row("Destinatario email", email_recipient_entry));
-    gtk_box_append(GTK_BOX(email_box), create_setting_row("Ora report email (0-23)", email_report_hour_entry));
-    gtk_box_append(GTK_BOX(email_box), create_setting_row("Minuto report email (0-59)", email_report_minute_entry));
-    gtk_box_append(GTK_BOX(email_box), create_setting_row("Comando invio email", email_sendmail_command_entry));
-    gtk_box_append(GTK_BOX(email_box), create_section_title("Test consegna"));
-    gtk_box_append(GTK_BOX(email_box), gtk_label_new("Il test usa il comando configurato, ad esempio: sendmail -t. Se msmtp non è configurato, il test fallirà con il dettaglio dell'errore."));
+    gtk_box_append(GTK_BOX(email_box), create_section_title_i18n("section.daily_email_report"));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row_i18n("setting.email_enabled", email_daily_enabled_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row_i18n("setting.email_recipient", email_recipient_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row_i18n("setting.email_hour", email_report_hour_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row_i18n("setting.email_minute", email_report_minute_entry));
+    gtk_box_append(GTK_BOX(email_box), create_setting_row_i18n("setting.email_command", email_sendmail_command_entry));
+    gtk_box_append(GTK_BOX(email_box), create_section_title_i18n("section.delivery_test"));
+    gtk_box_append(GTK_BOX(email_box), gtk_label_new(tr_key("help.email_delivery")));
     gtk_box_append(GTK_BOX(email_box), email_buttons_box);
 
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(email_dialog_scrolled_window), email_box);
     gtk_window_set_child(GTK_WINDOW(email_expander), email_dialog_scrolled_window);
 
     coinbase_expander = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(coinbase_expander), "Coinbase API");
+    gtk_window_set_title(GTK_WINDOW(coinbase_expander), tr_key("section.coinbase_api"));
     gtk_window_set_transient_for(GTK_WINDOW(coinbase_expander), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(coinbase_expander), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(coinbase_expander), 760, 220);
@@ -3483,16 +3760,37 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     coinbase_api_key_entry = gtk_entry_new();
     coinbase_api_secret_entry = gtk_password_entry_new();
 
-    save_coinbase_button = gtk_button_new_with_label("Salva credenziali Coinbase");
+    save_coinbase_button = create_i18n_button("button.save_coinbase");
 
-    gtk_box_append(GTK_BOX(coinbase_box), create_setting_row("API Key", coinbase_api_key_entry));
-    gtk_box_append(GTK_BOX(coinbase_box), create_setting_row("API Secret", coinbase_api_secret_entry));
+    gtk_box_append(GTK_BOX(coinbase_box), create_setting_row_i18n("setting.api_key", coinbase_api_key_entry));
+    gtk_box_append(GTK_BOX(coinbase_box), create_setting_row_i18n("setting.api_secret", coinbase_api_secret_entry));
     gtk_box_append(GTK_BOX(coinbase_box), save_coinbase_button);
 
     gtk_window_set_child(GTK_WINDOW(coinbase_expander), coinbase_box);
 
+    language_window = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(language_window), tr_key("label.language"));
+    gtk_window_set_transient_for(GTK_WINDOW(language_window), GTK_WINDOW(window));
+    gtk_window_set_modal(GTK_WINDOW(language_window), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(language_window), 460, 150);
+    gtk_window_set_resizable(GTK_WINDOW(language_window), FALSE);
+    g_signal_connect(language_window, "close-request", G_CALLBACK(on_hide_window_close_request), NULL);
+
+    language_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(language_box, 18);
+    gtk_widget_set_margin_bottom(language_box, 18);
+    gtk_widget_set_margin_start(language_box, 18);
+    gtk_widget_set_margin_end(language_box, 18);
+    language_save_button = gtk_button_new_with_label(tr_key("button.save_settings"));
+    configure_action_button(language_save_button);
+    gtk_widget_add_css_class(language_save_button, "primary-action");
+
+    gtk_box_append(GTK_BOX(language_box), create_setting_row_i18n("label.language", language_dropdown));
+    gtk_box_append(GTK_BOX(language_box), language_save_button);
+    gtk_window_set_child(GTK_WINDOW(language_window), language_box);
+
     history_window = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(history_window), "Storico operazioni");
+    gtk_window_set_title(GTK_WINDOW(history_window), tr_key("section.trade_history"));
     gtk_window_set_transient_for(GTK_WINDOW(history_window), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(history_window), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(history_window), 900, 420);
@@ -3504,7 +3802,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_margin_start(history_box, 12);
     gtk_widget_set_margin_end(history_box, 12);
 
-    history_title = gtk_label_new("Storico operazioni - più recenti in alto");
+    history_title = gtk_label_new(tr_key("title.trade_history_full"));
     gtk_widget_add_css_class(history_title, "title-3");
     gtk_widget_set_halign(history_title, GTK_ALIGN_START);
 
@@ -3521,7 +3819,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_set_child(GTK_WINDOW(history_window), history_box);
 
     audit_window = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(audit_window), "Audit decisioni motore");
+    gtk_window_set_title(GTK_WINDOW(audit_window), tr_key("section.engine_audit"));
     gtk_window_set_transient_for(GTK_WINDOW(audit_window), GTK_WINDOW(window));
     gtk_window_set_modal(GTK_WINDOW(audit_window), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(audit_window), 1000, 480);
@@ -3533,7 +3831,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_margin_start(audit_box, 12);
     gtk_widget_set_margin_end(audit_box, 12);
 
-    audit_title = gtk_label_new("Audit decisioni motore - più recenti in alto");
+    audit_title = gtk_label_new(tr_key("title.audit_full"));
     gtk_widget_add_css_class(audit_title, "title-3");
     gtk_widget_set_halign(audit_title, GTK_ALIGN_START);
 
@@ -3570,6 +3868,8 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     AppWidgets *widgets = g_malloc0(sizeof(AppWidgets));
     widgets->state = state;
     widgets->window = window;
+    widgets->root_box = root_box;
+    widgets->menu_bar = menu_bar;
     widgets->timer_id = 0;
     widgets->status_message_timeout_id = 0;
     widgets->has_temporary_status_message = FALSE;
@@ -3591,6 +3891,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->settings_expander = settings_expander;
     widgets->email_expander = email_expander;
     widgets->coinbase_expander = coinbase_expander;
+    widgets->language_window = language_window;
     widgets->history_title = history_title;
     widgets->history_scrolled_window = history_window;
     widgets->audit_title = audit_title;
@@ -3619,6 +3920,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->micro_live_stop_after_real_order_entry = micro_live_stop_after_real_order_entry;
     widgets->micro_live_allow_accumulation_entry = micro_live_allow_accumulation_entry;
     widgets->email_daily_enabled_entry = email_daily_enabled_entry;
+    widgets->save_settings_button = save_settings_button;
     widgets->email_recipient_entry = email_recipient_entry;
     widgets->email_report_hour_entry = email_report_hour_entry;
     widgets->email_report_minute_entry = email_report_minute_entry;
@@ -3626,8 +3928,12 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->save_email_button = save_email_button;
     widgets->test_email_button = test_email_button;
     widgets->emergency_stop_label = emergency_stop_label;
+    widgets->activate_emergency_stop_button = activate_emergency_stop_button;
+    widgets->reset_emergency_stop_button = reset_emergency_stop_button;
     widgets->live_trading_arm_label = live_trading_arm_label;
     widgets->live_trading_arm_buttons_box = live_trading_arm_buttons_box;
+    widgets->release_reserve_slot_button = release_reserve_slot_button;
+    widgets->lock_reserve_slot_button = lock_reserve_slot_button;
     widgets->arm_live_trading_button = arm_live_trading_button;
     widgets->disarm_live_trading_button = disarm_live_trading_button;
     widgets->acknowledge_real_order_button = acknowledge_real_order_button;
@@ -3635,8 +3941,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     widgets->clear_paper_slots_button = clear_paper_slots_button;
     widgets->run_paper_best_profit_button = run_paper_best_profit_button;
     widgets->runtime_mode_dropdown = runtime_mode_dropdown;
+    widgets->language_dropdown = language_dropdown;
     widgets->coinbase_api_key_entry = coinbase_api_key_entry;
     widgets->coinbase_api_secret_entry = coinbase_api_secret_entry;
+    widgets->save_coinbase_button = save_coinbase_button;
 
     const GActionEntry window_actions[] = {
         {
@@ -3662,6 +3970,10 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
         {
             .name = "show-coinbase-api",
             .activate = on_menu_show_coinbase_api_action
+        },
+        {
+            .name = "show-language-settings",
+            .activate = on_menu_show_language_settings_action
         },
         {
             .name = "show-trade-history",
@@ -3742,6 +4054,7 @@ void on_app_activate(GtkApplication *app, gpointer user_data) {
     g_signal_connect(release_reserve_slot_button, "clicked", G_CALLBACK(on_release_reserve_slot_clicked), widgets);
     g_signal_connect(lock_reserve_slot_button, "clicked", G_CALLBACK(on_lock_reserve_slot_clicked), widgets);
     g_signal_connect(save_coinbase_button, "clicked", G_CALLBACK(on_save_coinbase_clicked), widgets);
+    g_signal_connect(language_save_button, "clicked", G_CALLBACK(on_language_save_clicked), widgets);
     g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), widgets);
 
     g_object_set_data_full(

@@ -3,6 +3,7 @@ CFLAGS=-Wall -Wextra -g -DHELIX_ENABLE_REAL_COINBASE_ORDERS `pkg-config --cflags
 LIBS=`pkg-config --libs gtk4` -lsqlite3 -lcurl -lcjson -ljwt -lm
 
 SRC=src/main.c \
+	src/i18n/ui_language.c \
 	src/ui/window.c \
 	src/engine/bot_state.c \
 	src/engine/engine.c \

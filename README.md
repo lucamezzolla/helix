@@ -66,6 +66,7 @@ v0.3.0-rc8-readable-daily-report
 v0.3.0-rc9-real-sell-supervised-runbook
 v0.3.0-rc10-real-sell-one-shot-gate
 v0.3.0-rc12-simulated-price-override
+v0.3.0-rc13-multilingual-ui
 ```
 
 Current technical status:
@@ -93,6 +94,7 @@ Readable daily report mode names                      ✅
 Supervised real SELL runbook                          ✅
 One-shot real SELL gate                               ✅
 Simulated market price override for safe SELL testing  ✅
+Multilingual UI foundation and localized user-facing text ✅ / ⚠️
 Real SELL execution still disabled                    ✅
 ```
 
@@ -127,7 +129,10 @@ Validated features:
 - generate daily email reports;
 - display data through GTK table views;
 - test a simulated BTC-EUR price override without allowing real orders;
-- prepare the future real slot closing flow after a properly reconciled real SELL.
+- prepare the future real slot closing flow after a properly reconciled real SELL;
+- switch the GTK interface language from the Preferences menu;
+- display the main UI in Italian, English, Spanish, Portuguese or French;
+- localize the main dashboard, menu labels, principal buttons and part of the generated UI reports.
 
 ---
 
@@ -169,6 +174,9 @@ helix/
 │   └── release notes / checklist files
 ├── src/
 │   ├── main.c
+│   ├── i18n/
+│   │   ├── ui_language.c
+│   │   └── ui_language.h
 │   ├── config/
 │   │   ├── env_loader.c
 │   │   └── env_loader.h
@@ -664,6 +672,61 @@ writes PAPER_SIM audit entries
 
 ---
 
+## Multilingual interface
+
+Helix includes an internal multilingual UI layer.
+
+Supported interface languages:
+
+```text
+Italiano
+English
+Español
+Português
+Français
+```
+
+The selected language is stored in the local SQLite settings table using:
+
+```text
+ui.language
+```
+
+The language can be changed from:
+
+```text
+Preferences -> Interface language
+```
+
+After saving, Helix refreshes the visible GTK menu and the main user-facing text without requiring a full application restart.
+
+Current coverage includes:
+
+```text
+main menu
+language dialog
+main dashboard labels
+principal action buttons
+main table/report window titles
+part of the generated user-facing reports
+daily report headings
+```
+
+Some low-level diagnostic strings, internal audit reasons and historical database messages may remain untranslated by design. They are useful for debugging, SQL filtering, issue reports and comparing old audit entries.
+
+Future multilingual work should continue gradually, especially for:
+
+```text
+complete report body localization
+email delivery diagnostics
+all warning/error user messages
+all dry-run scenario text
+technical reason messages that are safe to translate
+```
+
+
+---
+
 ## SELL reconciliation and real slot close
 
 Groundwork for future reconciled real SELL is prepared.
@@ -767,6 +830,7 @@ The `real-sell-supervised` branch is dedicated to the first supervised real SELL
 - `v0.3.0-rc9-real-sell-supervised-runbook`: operational runbook for supervised real SELL.
 - `v0.3.0-rc10-real-sell-one-shot-gate`: one-shot gate allowing at most one real SELL in the supervised test.
 - `v0.3.0-rc12-simulated-price-override`: simulated BTC-EUR price override for safe SELL-path testing.
+- `v0.3.0-rc13-multilingual-ui`: internal multilingual UI layer and localized user-facing interface text.
 
 ### Expected behavior in LIVE_READONLY
 

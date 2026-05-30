@@ -2,6 +2,7 @@
 
 #include "email_delivery.h"
 #include "../db/database.h"
+#include "../i18n/ui_language.h"
 
 #include <sqlite3.h>
 #include <stdarg.h>
@@ -36,6 +37,21 @@ static const char *daily_report_bot_mode_to_string(BotMode mode) {
 #define DAILY_REPORT_MESSAGE_SIZE 384
 #define DAILY_REPORT_LAST_DATE_KEY "email.last_daily_report_date"
 #define DAILY_REPORT_DB_PATH "data/helix.db"
+
+static HelixLanguage daily_report_language(void) {
+    char buffer[16];
+
+    if (db_get_setting("ui.language", buffer, sizeof(buffer))) {
+        return helix_language_from_code(buffer);
+    }
+
+    return HELIX_LANG_IT;
+}
+
+static const char *daily_tr(const char *key) {
+    return helix_tr(daily_report_language(), key);
+}
+
 
 static void append_text(char *buffer, size_t buffer_size, const char *text) {
     size_t used;
@@ -179,7 +195,7 @@ static void append_recent_audit(
     }
 
     if (rows == 0) {
-        append_text(body, body_size, "Nessun evento recente.\n");
+        append_format(body, body_size, "%s\n", daily_tr("daily.no_recent_events"));
     }
 
     sqlite3_finalize(stmt);
@@ -201,16 +217,16 @@ static void build_daily_report_body(
 
     body[0] = '\0';
 
-    append_text(body, body_size, "Helix - report giornaliero\n");
+    append_format(body, body_size, "%s\n", daily_tr("daily.title"));
     append_text(body, body_size, "===========================\n\n");
-    append_format(body, body_size, "Data locale: %s\n", date_text);
-    append_text(body, body_size, "Modalità: report informativo. Nessun ordine viene eseguito da questa email.\n\n");
+    append_format(body, body_size, "%s: %s\n", daily_tr("daily.local_date"), date_text);
+    append_format(body, body_size, "%s\n\n", daily_tr("daily.info_mode"));
 
     if (state != NULL) {
         append_format(
             body,
             body_size,
-            "== Stato attuale ==\n"
+            "== %s ==\n"
             "Running: %s\n"
             "Mode: %s\n"
             "EUR: %.2f\n"
@@ -219,7 +235,8 @@ static void build_daily_report_body(
             "Prezzo medio: %.2f\n"
             "Slot usati: %d / %d\n"
             "Ultima operazione: %.160s\n\n",
-            state->running ? "sì" : "no",
+            daily_tr("daily.current_state"),
+            state->running ? daily_tr("word.yes") : daily_tr("word.no"),
             daily_report_bot_mode_to_string(state->mode),
             state->eur_balance,
             state->btc_balance,
@@ -230,14 +247,14 @@ static void build_daily_report_body(
             state->last_trade
         );
     } else {
-        append_text(body, body_size, "== Stato attuale ==\nStato Helix non disponibile.\n\n");
+        append_format(body, body_size, "== %s ==\nHelix state unavailable.\n\n", daily_tr("daily.current_state"));
     }
 
     if (settings != NULL) {
         append_format(
             body,
             body_size,
-            "== Impostazioni principali ==\n"
+            "== %s ==\n"
             "Max slot: %d\n"
             "Slot amount EUR: %.2f\n"
             "Riserva protetta: %.2f%%\n"
@@ -246,14 +263,15 @@ static void build_daily_report_body(
             "Max micro ordine: %.2f EUR\n"
             "Stop dopo ordine reale: %s\n"
             "Email giornaliera: %s alle %02d:%02d\n\n",
+            daily_tr("daily.main_settings"),
             settings->max_slots,
             settings->slot_amount_eur,
             settings->liquidity_reserve_percent,
             settings->reserve_released_slots,
-            settings->micro_live_enabled ? "attivo" : "disattivato",
+            settings->micro_live_enabled ? daily_tr("word.active") : daily_tr("word.disabled"),
             settings->micro_live_max_order_eur,
-            settings->micro_live_stop_after_real_order ? "attivo" : "disattivato",
-            settings->email_daily_enabled ? "attiva" : "disattivata",
+            settings->micro_live_stop_after_real_order ? daily_tr("word.active") : daily_tr("word.disabled"),
+            settings->email_daily_enabled ? daily_tr("word.active") : daily_tr("word.disabled"),
             settings->email_report_hour,
             settings->email_report_minute
         );
@@ -262,9 +280,9 @@ static void build_daily_report_body(
     memset(slots, 0, sizeof(slots));
     slot_count = db_get_open_position_slots(slots, HELIX_MAX_OPEN_POSITION_SLOTS);
 
-    append_text(body, body_size, "== Slot reali aperti ==\n");
+    append_format(body, body_size, "== %s ==\n", daily_tr("daily.open_real_slots"));
     if (slot_count <= 0) {
-        append_text(body, body_size, "Nessuno slot reale aperto.\n");
+        append_format(body, body_size, "%s\n", daily_tr("daily.no_open_real_slots"));
     } else {
         for (int i = 0; i < slot_count; i++) {
             open_btc += slots[i].base_size_btc;
